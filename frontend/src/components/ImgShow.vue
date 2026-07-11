@@ -29,7 +29,7 @@
           </div>
         </div>
         <div>
-          <div v-if="item.type!=='场景分类'">
+          <div>
             <el-image
               ref="tableTab"
               class="img-display"
@@ -51,12 +51,6 @@
                 "
               ><i class="iconfont icon-xiazai" /></span>
             </div>
-          </div>
-          <div
-            v-else
-            class="img-index"
-          >
-            <span class="index-number ">{{ Object.keys(item.data)[0] }}: {{ item.data[Object.keys(item.data)] }}</span>
           </div>
         </div>
       </div>

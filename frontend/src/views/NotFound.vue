@@ -83,7 +83,7 @@ export default {
       this.$router.go(-1);
     },
     goHome() {
-      this.$router.push('detectchanges');
+      this.$router.push('/detectobjects');
     }
   }
 };

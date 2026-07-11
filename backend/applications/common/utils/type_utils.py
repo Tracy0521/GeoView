@@ -1,19 +1,12 @@
-type_map = ["", "变化检测", "目标检测", "地物分类", "场景分类", "图像复原"]
+def str_to_type(value):
+    return 2 if value == '目标检测' else None
 
 
-def str_to_type(strs):
-    if strs in type_map:
-        return type_map.index(strs)
-    return None
-
-
-def type_to_str(num):
-    if num < len(type_map):
-        return type_map[num]
-    return ""
+def type_to_str(value):
+    return '目标检测' if value == 2 else ''
 
 
 def items_handle(items):
-    for t in items:
-        if 'type' in t:
-            t['type'] = type_to_str(t['type'])
+    for item in items:
+        if 'type' in item:
+            item['type'] = type_to_str(item['type'])

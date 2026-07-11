@@ -1,133 +1,106 @@
-<div align="center">
-    <p align="center">
-        <img src="https://user-images.githubusercontent.com/78073130/200159343-c2bab155-f66d-4548-81ef-7c23c11d9dc1.png" alt="logo" width="500" />
-    </p>
+# GeoView 目标检测平台
 
-[![build status](https://github.com/PaddleCV-SIG/GeoView/actions/workflows/build.yml/badge.svg?branch=develop)](https://github.com/PaddleCV-SIG/GeoView/actions)
-[![contributors](https://img.shields.io/github/contributors/PaddleCV-SIG/GeoView?color=9ea)](https://github.com/PaddleCV-SIG/GeoView/graphs/contributors)
-[![commits](https://img.shields.io/github/commit-activity/m/PaddleCV-SIG/GeoView?color=3af)](https://github.com/PaddleCV-SIG/GeoView/commits)
-[![issues](https://img.shields.io/github/issues/PaddleCV-SIG/GeoView?color=9cc)](https://github.com/PaddleCV-SIG/GeoView/issues)
-![python version](https://img.shields.io/badge/python-3.7+-orange.svg)
-![node.js version](https://img.shields.io/badge/nodejs-16+-orange.svg)
+GeoView 是一个基于 PaddleRS、Flask 和 Vue 3 的遥感图像目标检测 Web 平台。当前精简版仅保留两个页面：
 
-</div>
+- **目标检测**：上传单张图片或图片文件夹，选择目标检测模型，可选 CLAHE、锐化、平滑或滤波预处理，执行检测并预览、下载结果。
+- **历史记录**：分页查看目标检测记录，预览、下载或删除检测结果。
 
-<div align="center">
-<table>
-    <tr>
-        <td><img src="https://user-images.githubusercontent.com/21275753/199176961-97466391-6cea-4a11-999a-78b8b0e0d602.gif", width="250"></td>
-        <td><img src="https://user-images.githubusercontent.com/21275753/199176518-c3e63a6d-f96b-4c8d-bc2e-932d7fb9c324.gif", width="250"></td>
-        <td><img src="https://user-images.githubusercontent.com/21275753/199176786-0cc5156d-b0e9-4922-a555-737af5555a49.gif", width="250"></td>
-    </tr>
-    <tr>
-        <td align="center">变化检测</td>
-        <td align="center">场景分类</td>
-        <td align="center">目标检测</td>
-    </tr>
-    <tr>
-        <td><img src="https://user-images.githubusercontent.com/21275753/199176761-ac67b553-309c-4d3a-90cc-31ffe3c8522a.gif", width="250"></td>
-        <td><img src="https://user-images.githubusercontent.com/21275753/199175092-cf640078-868e-4633-aca0-e5b69971bc75.gif", width="250"></td>
-        <td><img src="https://user-images.githubusercontent.com/90198481/198829346-67e8945d-d587-4feb-a9cb-dc787e267114.png", width="250"></td>
-    </tr>
-    <tr>
-        <td align="center">图像复原</td>
-        <td align="center">地物分类</td>
-        <td align="center">在线地图</td>
-    </tr>
-</table>
-</div>
+原有的变化检测、地物分类、场景分类、图像复原和在线地图功能，以及对应的前后端路由和实现，均已移除。
 
-## 最新动态
+## 环境要求
 
-- [2022-11-09] 🔥 GeoView发布0.1版本，支持5大遥感解译任务，提供影像预处理、后处理、图像在线编辑、历史记录查询等辅助功能。详细发版信息请参考[Release Note](https://github.com/PaddleCV-SIG/GeoView/releases)。
+- Python 3.7+
+- Node.js 16+
+- MySQL 5.7+
+- PaddlePaddle `>=2.2.0,<2.5.0`
 
-## 简介
+## 安装
 
-GeoView是一款开源、轻量、功能丰富的**遥感影像智能解译工具**，致力于实现遥感领域深度学习模型在Web平台的快速部署。
+1. 安装 PaddlePaddle（以下为 CPU 版本示例）：
 
-## 特性
+   ```shell
+   pip install paddlepaddle -i https://mirror.baidu.com/pypi/simple
+   ```
 
-GeoView支持5大遥感影像解译任务：
+2. 安装 PaddleRS 和后端依赖：
 
-- 变化检测
-- 场景分类
-- 目标检测
-- 图像复原
-- 地物分类
+   ```shell
+   pip install -r PaddleRS/requirements.txt
+   pip install -e PaddleRS/
+   pip install -r backend/requirements.txt
+   ```
 
-除基本解译功能外，GeoView提供以下辅助功能：
+3. 安装前端依赖：
 
-- 遥感影像预处理
-- 解译结果后处理
-- 图像在线编辑
-- 解译结果导出
-- 历史记录查询
-- 在线地图解译
+   ```shell
+   cd frontend
+   npm install
+   ```
 
-## 安装说明
+## 配置
 
-### 前置依赖安装
+1. 根据实际环境修改根目录的 `config.yaml`，配置前后端地址和端口。
+2. 根据 `backend/.flaskenv_template` 创建或调整 `backend/.flaskenv`，配置数据库连接。
+3. 将 PaddleRS 导出的目标检测模型目录放在：
 
-在执行后续步骤之前，请确保您安装了如下依赖库：
+   ```text
+   backend/model/object_detection/<模型目录>/
+   ```
 
-- MySQL >= 5.7
-- Node.js >= 16.0
-- PaddlePaddle >= 2.2.0 && < 2.5.0
+   模型元信息中的 `model_type` 必须为 `detector`。
 
-其中，PaddlePaddle安装可以参考[PaddlePaddle官网](https://www.paddlepaddle.org.cn/)。这里给出安装CPU版本的例子：
+## 启动
+
+后端：
 
 ```shell
-pip install paddlepaddle -i https://mirror.baidu.com/pypi/simple
+cd backend
+python app.py
 ```
 
-### 项目下载与安装
-
-上述依赖安装完毕后，首先从GitHub将GeoView项目克隆到本地：
-
-```shell
-git clone --recursive https://github.com/PaddleCV-SIG/GeoView.git
-```
-
-运行如下命令安装PaddleRS：
-
-```shell
-pip install -r PaddleRS/requirements.txt
-pip install -e PaddleRS/
-```
-
-接着，运行如下命令以安装Web后端的所有依赖：
-
-```shell
-pip install -r backend/requirements.txt
-```
-
-最后，运行如下命令安装Web前端的所有依赖：
+前端（新终端）：
 
 ```shell
 cd frontend
-npm install
+npm run serve
 ```
 
-## 使用说明
+浏览器访问前端地址后，根路由会自动进入 `/detectobjects`。历史记录页面位于 `/history`。
 
-- 若您的需求是使用GeoView部署和发布模型，请阅读[开发者文档](./docs/dev.md)。
-- 若您希望了解基于GeoView发布的产品的使用方式，请阅读[用户文档](./docs/user.md)。
-- 完整使用GeoView的所有功能，请首先根据[开发者文档](./docs/dev.md)配置环境并启动服务，然后阅读[用户文档](./docs/user.md)了解使用细节。
+## 构建前端
 
-## 代码结构
-
-GeoView目录树中关键部分如下：
-
-``` plain
-├── backend              # Web后端
-│     ├── applications   # 后端核心代码
-│     ├── model          # 模型存放目录
-│     └── static         # 图像存储目录
-└── frontend             # Web前端
+```shell
+cd frontend
+npm run build
 ```
 
-## 开源贡献
+构建产物输出到 `frontend/dist`。
 
-GeoView欢迎各种形式的开源贡献。
+## 主要目录
 
-特别感谢以下开发者对本项目的贡献：（排名不分先后）[曹凌铭](https://github.com/terayco)，[卢利栋](https://github.com/jscslld)，[易博坤](https://github.com/yibaikuai)。
+```text
+GeoView/
+├─ backend/
+│  ├─ applications/api/          # 上传、目标检测、模型和历史记录接口
+│  ├─ applications/interface/    # 目标检测推理封装
+│  ├─ model/object_detection/    # 目标检测模型
+│  └─ static/upload/             # 上传图片与检测结果
+├─ frontend/
+│  └─ src/
+│     ├─ views/mainfun/DetectObjects.vue
+│     └─ views/history/History.vue
+└─ PaddleRS/
+```
+
+## 接口概览
+
+- `POST /api/file/upload`：上传待检测图片
+- `GET /api/model/list/object_detection`：获取可用目标检测模型
+- `POST /api/analysis/image_pre`：执行目标检测页所需的图像预处理
+- `POST /api/analysis/object_detection`：执行目标检测并写入历史记录
+- `GET /api/history/list`：分页获取目标检测历史记录
+- `DELETE /api/history/batchRemove`：批量删除目标检测历史记录
+
+## License
+
+本项目沿用原 GeoView 项目的 [Apache License 2.0](LICENSE)。

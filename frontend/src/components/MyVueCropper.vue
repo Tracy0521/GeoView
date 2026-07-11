@@ -206,32 +206,8 @@ export default {
           this.uploadSrc.list = res.data.data.map((item) => {
             return item.src;
           });
-          if (funtype === "地物分类") {
-            this.imgUpload(this.uploadSrc,'semantic_segmentation').then((res) => {
-              this.fileList = [];
-              this.$message.success("上传成功！");
-              this.$emit('child-refresh')
-            }).catch((rej)=>{})
-          } else if (funtype === "目标检测") {
+          if (funtype === "目标检测") {
             this.imgUpload(this.uploadSrc,'object_detection').then((res) => {
-              this.fileList = [];
-              this.$message.success("上传成功！");
-              this.$emit('child-refresh')
-            }).catch((rej)=>{})
-          }
-          else if (funtype === "场景分类") {
-            delete this.uploadSrc.prehandle
-            delete this.uploadSrc.denoise
-            this.imgUpload(this.uploadSrc,'classification').then((res) => {
-              this.fileList = [];
-              this.$message.success("上传成功！");
-              this.$emit('child-refresh')
-            }).catch((rej)=>{})
-          }
-          else if(funtype === "图像复原"){
-            delete this.uploadSrc.prehandle
-            delete this.uploadSrc.denoise
-            this.imgUpload(this.uploadSrc).then((res) => {
               this.fileList = [];
               this.$message.success("上传成功！");
               this.$emit('child-refresh')

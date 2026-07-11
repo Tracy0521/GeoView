@@ -4,7 +4,6 @@ from flask import Blueprint, request
 from sqlalchemy import desc
 
 from applications.common.curd import model_to_dicts
-from applications.common.utils import type_utils
 from applications.common.utils.http import fail_api, success_api, table_api
 from applications.common.utils.type_utils import items_handle
 from applications.extensions import db
@@ -21,26 +20,14 @@ history_api = Blueprint('history_api', __name__, url_prefix='/api/history')
 def history_list():
     # orm查询
     # 使用分页获取data需要.items
-    _type = request.args.get('type', type=str)
-    if _type is None or _type == '""' or _type == "":
-        log = Analysis.query.order_by(desc(
-            Analysis.create_time)).layui_paginate()
-        count = log.total
-        items = log.items
-        analysis_handle(items)
-        dicts = model_to_dicts(schema=AnalysisSchema, data=items)
-        items_handle(dicts)
-        return table_api(data=dicts, count=count)
-    else:
-        to_type = type_utils.str_to_type(_type)
-        log = Analysis.query.filter_by(
-            type=to_type).order_by(desc(Analysis.create_time)).layui_paginate()
-        count = log.total
-        items = log.items
-        analysis_handle(items)
-        dicts = model_to_dicts(schema=AnalysisSchema, data=items)
-        items_handle(dicts)
-        return table_api(data=dicts, count=count)
+    log = Analysis.query.filter_by(type=2).order_by(
+        desc(Analysis.create_time)).layui_paginate()
+    count = log.total
+    items = log.items
+    analysis_handle(items)
+    dicts = model_to_dicts(schema=AnalysisSchema, data=items)
+    items_handle(dicts)
+    return table_api(data=dicts, count=count)
 
 
 def analysis_handle(items):
@@ -61,9 +48,9 @@ def history_delete():
     req_json = request.json
     if 'ids' in req_json:
         ids = req_json['ids']
-        for id in ids:
-            res = Analysis.query.filter_by(id=id).delete()
-            db.session.commit()
+        Analysis.query.filter(Analysis.id.in_(ids), Analysis.type == 2).delete(
+            synchronize_session=False)
+        db.session.commit()
         return success_api(msg="批量删除成功")
     return fail_api(msg="参数异常")
     pass

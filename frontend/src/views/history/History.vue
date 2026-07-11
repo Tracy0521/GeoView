@@ -1,15 +1,9 @@
 <template>
   <div>
     <div class="hint">
-      当前浏览功能区：<span v-if="type !== ''">{{ type }}</span><span v-else>全部</span><i
+      当前功能：目标检测<i
         style="margin-left: 8px; font-size: 20px"
-        :class="{
-          'iconfont icon-bianhuajiance': type === '变化检测',
-          'iconfont icon-mubiaojiance': type === '目标检测',
-          'iconfont icon-erfenleibianhuajiance16px': type === '地物分类',
-          'iconfont icon-changjingguanli' : type === '场景分类',
-          'iconfont icon-jishu' : type === '图像复原'
-        }"
+        class="iconfont icon-mubiaojiance"
       />
     </div>
     <el-table
@@ -25,16 +19,7 @@
       </el-table-column>
       <el-table-column label="功能区">
         <template #default="scope">
-          <span id="sub-title"><i
-            :class="{
-              'iconfont icon-bianhuajiance': scope.row.type === '变化检测',
-              'iconfont icon-mubiaojiance': scope.row.type === '目标检测',
-              'iconfont icon-erfenleibianhuajiance16px':
-                scope.row.type === '地物分类',
-              'iconfont icon-changjingguanli' : scope.row.type === '场景分类',
-              'iconfont icon-jishu' : scope.row.type ==='图像复原'
-            }"
-          />{{ scope.row.type }}
+          <span id="sub-title"><i class="iconfont icon-mubiaojiance" />{{ scope.row.type }}
           </span>
         </template>
       </el-table-column>
@@ -48,31 +33,17 @@
             @click="previewOnePic(scope.row.before_img)"
           >
 
-          <img
-            v-if="scope.row.type === '变化检测'"
-            :src="global.BASEURL + scope.row.before_img1"
-            min-width="70"
-            height="70"
-            style="margin-left: 20px"
-            alt="原图"
-            @click="previewOnePic(scope.row.before_img1)"
-          >
         </template>
       </el-table-column>
       <el-table-column label="结果图/预测结果">
         <template #default="scope">
           <img
-            v-show="scope.row.type !== '场景分类'"
             :src="global.BASEURL + scope.row.after_img"
             min-width="70"
             height="70"
             alt="结果图"
             @click="previewOnePic(scope.row.after_img)"
           >
-          <div v-show="scope.row.type === '场景分类'">
-            {{ Object.keys(scope.row.data)[0] }}:
-            {{ scope.row.data[(Object.keys(scope.row.data)[0])] }}
-          </div>
         </template>
       </el-table-column>
 
@@ -86,7 +57,6 @@
             删除
           </el-button>
           <el-button
-            v-show="scope.row.type !== '变化检测'&&scope.row.type !=='场景分类'"
             size="default"
             type="primary"
             @click="previewTwoPic(scope.row.before_img, scope.row.after_img)"
@@ -94,29 +64,6 @@
             预览
           </el-button>
           <el-button
-            v-show="scope.row.type === '场景分类'"
-            size="default"
-            type="primary"
-            @click="previewOnePic(scope.row.before_img, scope.row.after_img)"
-          >
-            预览
-          </el-button>
-          <el-button
-            v-show="scope.row.type ==='变化检测'"
-            size="default"
-            type="primary"
-            @click="
-              previewThreePic(
-                scope.row.before_img,
-                scope.row.before_img1,
-                scope.row.after_img
-              )
-            "
-          >
-            预览
-          </el-button>
-          <el-button
-            v-show="scope.row.type !== '场景分类'"
             size="default"
             type="primary"
             @click="
@@ -133,80 +80,6 @@
       </el-table-column>
     </el-table>
 
-    <div
-      type="primary"
-      class="select-fun-drawer hidden-md-and-down"
-      @click="isSelect = true"
-    >
-      <div class="select-fun-title">
-        <span style="">功能筛选</span>
-      </div>
-      <div class="select-fun-icon">
-        <i class="iconfont icon-shaixuan" />
-      </div>
-    </div>
-
-    <el-drawer
-      v-model="isSelect"
-      title="功能区筛选"
-      :direction="direction"
-      :size="size"
-    >
-      <el-menu
-        class="el-menu-vertical-demo"
-        text-color="black"
-        background-color="white"
-      >
-        <el-menu-item-group>
-          <el-menu-item
-            index="1"
-            @click="onlyOneFun('变化检测')"
-          >
-            <h3>
-              <i class="iconfont icon-bianhuajiance" />变化检测
-            </h3>
-          </el-menu-item>
-          <el-menu-item
-            index="2"
-            @click="onlyOneFun('目标检测')"
-          >
-            <h3>
-              <i class="iconfont icon-mubiaojiance" />目标检测
-            </h3>
-          </el-menu-item>
-          <el-menu-item
-            index="3"
-            @click="onlyOneFun('地物分类')"
-          >
-            <h3>
-              <i class="iconfont icon-erfenleibianhuajiance16px" />地物分类
-            </h3>
-          </el-menu-item>
-          <el-menu-item
-            index="4"
-            @click="onlyOneFun('场景分类')"
-          >
-            <h3>
-              <i class="iconfont icon-changjingguanli" />场景分类
-            </h3>
-          </el-menu-item>
-          <el-menu-item
-            index="5"
-            @click="onlyOneFun('图像复原')"
-          >
-            <h3>
-              <i class="iconfont icon-jishu" />图像复原
-            </h3>
-          </el-menu-item>
-          <el-menu-item
-            index="6"
-            @click="onlyOneFun('')"
-          >
-            <h3><i class="iconfont icon-fuyuan" />列表复原</h3>
-          </el-menu-item>
-        </el-menu-item-group>
-      </el-menu>
-    </el-drawer>
     <div
       v-show="tableData.length !== 0"
       style="margin-top: 20px"
@@ -284,28 +157,6 @@
           >
         </el-row>
       </div>
-      <div v-else-if="flag === 3">
-        <el-row justify="space-evenly">
-          <img
-            id="pre-img"
-            :src="previewPic1"
-            alt="预览"
-          >
-
-          <img
-            id="pre-img"
-            :src="previewPic3"
-            alt="预览"
-          >
-
-          <img
-            id="pre-img"
-            :src="previewPic2"
-            alt="预览"
-          >
-        </el-row>
-        <el-row />
-      </div>
       <el-row
         type="flex"
         justify="center"
@@ -329,7 +180,6 @@ import { historyGetPage, historyDelete } from "@/api/history";
 import {
   previewOnePic,
   previewTwoPic,
-  previewThreePic,
 } from "@/utils/preview.js";
 import { downloadimgWithWords } from "@/utils/download.js";
 
@@ -374,7 +224,6 @@ export default {
     historyGetPage,
     historyDelete,
     previewTwoPic,
-    previewThreePic,
     handleDelete(index, row) {
       this.$confirm("此操作将永久删除, 是否继续?", "提示", {
         confirmButtonText: "确定",
@@ -481,11 +330,6 @@ export default {
     },
     goPrePage() {
       this.getTabelInfo();
-    },
-    onlyOneFun(funName){
-      this.type = funName
-      this.getTabelInfo()
-      this.isSelect = false
     },
   },
 };

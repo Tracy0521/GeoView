@@ -22,15 +22,6 @@ export function imgUpload(data,funUrl){
     })
 }
 
-export function histogramUpload(data){
-    return request({
-        method:'POST',
-        url:'/api/analysis/histogram_match',
-        data
-    })
-}
-
-
 export function prePhotoHandle(data){
     return request({
         method:'POST',
