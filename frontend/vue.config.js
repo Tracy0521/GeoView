@@ -6,6 +6,13 @@ config = YAML.parse(file)
 
 module.exports = defineConfig({
   transpileDependencies: true,
+  parallel: false,
+  chainWebpack: config => {
+    config.module.rule('js').use('babel-loader').tap(options => ({
+      ...options,
+      cacheDirectory: false
+    }))
+  },
   devServer: {
     host: config["host"]["frontend"],
     port: config["port"]["frontend"], // 端口

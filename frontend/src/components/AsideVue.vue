@@ -12,21 +12,29 @@
         class="platform-logo"
         :src="require('@/assets/image/logo/80.png')"
         alt="GeoView logo"
-        @click="goDetectObjects"
+        @click="goDashboard"
       >
       <div v-if="!isCollapse" id="platform-title">
-        <a class="platform-title" @click="goDetectObjects">GeoView遥感解译</a>
+        <a class="platform-title" @click="goDashboard">GeoView遥感解译</a>
       </div>
     </div>
 
     <el-divider content-position="center">
       <span v-show="!isCollapse" class="divider-title">功能区</span>
     </el-divider>
+    <el-menu-item index="/dashboard" @click="goDashboard">
+      <i v-show="isCollapse" class="nav-symbol">⌂</i>
+      <h3 v-show="!isCollapse"><i class="nav-symbol">⌂</i>首页总览</h3>
+    </el-menu-item>
     <el-menu-item index="/detectobjects" @click="goDetectObjects">
       <i v-show="isCollapse" class="iconfont icon-mubiaojiance" />
       <h3 v-show="!isCollapse">
         <i class="iconfont icon-mubiaojiance" />目标检测
       </h3>
+    </el-menu-item>
+    <el-menu-item index="/model-ranking" @click="goModelRanking">
+      <i v-show="isCollapse" class="nav-symbol">♜</i>
+      <h3 v-show="!isCollapse"><i class="nav-symbol">♜</i>模型排行</h3>
     </el-menu-item>
 
     <el-divider content-position="center">
@@ -42,14 +50,21 @@
 </template>
 
 <script>
-import { goDetectObjects, goHistory } from '@/utils/gosomewhere.js'
+import { goDashboard, goDetectObjects, goHistory } from '@/utils/gosomewhere.js'
 
 export default {
   props: {
     isCollapse: { type: Boolean, default: false },
-    activeIndex: { type: String, default: '/detectobjects' }
+    activeIndex: { type: String, default: '/dashboard' }
   },
-  methods: { goDetectObjects, goHistory }
+  methods: {
+    goDashboard,
+    goDetectObjects,
+    goHistory,
+    goModelRanking() {
+      if (!this.$route.path.startsWith('/model-ranking')) this.$router.push('/model-ranking')
+    }
+  }
 }
 </script>
 
@@ -68,6 +83,7 @@ export default {
     z-index: 1;
     h3 { padding-right: 30px; width: 100%; margin: 0 auto; }
     .iconfont { font-weight: normal; margin-right: 5px; }
+    .nav-symbol { font-style: normal; font-size: 22px; margin-right: 7px; }
   }
   .el-menu-item:hover { background-color: rgb(247, 246, 242); color: #ecf4ff !important; }
   .el-menu-item :hover::after { width: 100%; background: var(--theme--color); }

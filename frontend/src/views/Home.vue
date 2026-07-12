@@ -62,7 +62,7 @@ export default {
     document.body.style.overflow = "hidden";
   },
   updated(){
-    this.activeIndex=this.$route.path
+    this.activeIndex=this.$route.path.startsWith('/model-ranking') ? '/model-ranking' : this.$route.path
   },
   methods: {
     goCollapse() {

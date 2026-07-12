@@ -5,7 +5,7 @@ from applications.common.path_global import (
 )
 from applications.common.utils.http import fail_api, success_api
 from applications.interface.analysis import object_detection
-from applications.interface.utils import get_model_info
+from applications.interface.object_detection import resolve_model_path
 
 analysis_api = Blueprint('analysis_api', __name__, url_prefix='/api/analysis')
 
@@ -15,11 +15,9 @@ def object_detection_api():
     req_json = request.get_json(silent=True) or {}
     model_path = req_json.get('model_path')
     try:
-        model_info = get_model_info(model_path)
-        if model_info['_Attributes']['model_type'] != 'detector':
-            return fail_api('模型类型不正确，请检查')
-    except Exception:
-        return fail_api('模型不存在或格式不正确，请检查')
+        model_path = resolve_model_path(model_path)
+    except Exception as error:
+        return fail_api(str(error))
 
     image_list = req_json.get('list')
     prehandle = req_json.get('prehandle')
