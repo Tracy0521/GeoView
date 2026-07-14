@@ -33,9 +33,11 @@ export function requestfile(config) {
         }
       return response
     },
-    ({ response }) => {
-
-      return Promise.reject(error)
+    (error) => {
+      hideFullScreenLoading('#load')
+      const msg = error?.response?.data?.msg || '网络异常，请检查后端服务是否启动'
+      ElMessage.error(msg)
+      return Promise.reject(msg)
     },
   )
   return instance(config)

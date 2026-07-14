@@ -22,4 +22,12 @@ function goHistory() {
   }
 }
 
-export { goDashboard, goDetectObjects, goHistory }
+function goDatasetManagement() {
+  if (this.$route.path === '/dataset-management') {
+    this.$message.success('您已经在数据集管理页面了')
+  } else {
+    this.$router.push('/dataset-management')
+  }
+}
+
+export { goDashboard, goDetectObjects, goHistory, goDatasetManagement }

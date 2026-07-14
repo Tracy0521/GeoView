@@ -2,6 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 const Home = () => import('@/views/Home.vue')
 const Dashboard = () => import('@/views/Dashboard.vue')
+const DatasetManagement = () => import('@/views/dataset/DatasetManagement.vue')
+const DatasetDetail = () => import('@/views/dataset/DatasetDetail.vue')
 const ModelProjects = () => import('@/views/models/ModelProjects.vue')
 const ModelProjectDetail = () => import('@/views/models/ModelProjectDetail.vue')
 const DetectObjects = () => import('@/views/mainfun/DetectObjects.vue')
@@ -16,6 +18,8 @@ const routes = [
     component: Home,
     children: [
       { path: '/dashboard', name: 'Dashboard', component: Dashboard },
+      { path: '/dataset-management', name: 'DatasetManagement', component: DatasetManagement },
+      { path: '/dataset-management/:id', name: 'DatasetDetail', component: DatasetDetail },
       { path: '/model-ranking', name: 'ModelProjects', component: ModelProjects },
       { path: '/model-ranking/:id', name: 'ModelProjectDetail', component: ModelProjectDetail },
       { path: '/detectobjects', name: 'Detectobjects', component: DetectObjects },

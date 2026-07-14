@@ -26,6 +26,10 @@
       <i v-show="isCollapse" class="nav-symbol">⌂</i>
       <h3 v-show="!isCollapse"><i class="nav-symbol">⌂</i>首页总览</h3>
     </el-menu-item>
+    <el-menu-item index="/dataset-management" @click="goDatasetManagement">
+      <i v-show="isCollapse" class="nav-symbol">▤</i>
+      <h3 v-show="!isCollapse"><i class="nav-symbol">▤</i>数据集管理</h3>
+    </el-menu-item>
     <el-menu-item index="/detectobjects" @click="goDetectObjects">
       <i v-show="isCollapse" class="iconfont icon-mubiaojiance" />
       <h3 v-show="!isCollapse">
@@ -50,7 +54,7 @@
 </template>
 
 <script>
-import { goDashboard, goDetectObjects, goHistory } from '@/utils/gosomewhere.js'
+import { goDashboard, goDetectObjects, goHistory, goDatasetManagement } from '@/utils/gosomewhere.js'
 
 export default {
   props: {
@@ -61,6 +65,7 @@ export default {
     goDashboard,
     goDetectObjects,
     goHistory,
+    goDatasetManagement,
     goModelRanking() {
       if (!this.$route.path.startsWith('/model-ranking')) this.$router.push('/model-ranking')
     }
