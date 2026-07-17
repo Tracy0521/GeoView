@@ -10,6 +10,7 @@
     <nav class="detail-tabs" aria-label="项目页面切换">
       <button :class="{active:activeView==='charts'}" @click="switchView('charts')">指标对比</button>
       <button :class="{active:activeView==='ranking'}" @click="switchView('ranking')">数据排行</button>
+      <button :class="{active:activeView==='classAnalysis'}" @click="switchView('classAnalysis')">类别分析</button>
     </nav>
 
     <div v-show="activeView==='charts'" class="charts-view">
@@ -60,6 +61,8 @@
       <div class="ranking-footer"><span>共 {{ sortedRankingRows.length }} 个模型</span><div class="ranking-pagination"><button :disabled="rankingPage===1" @click="rankingPage--">上一页</button><button v-for="number in rankingPages" :key="number" :class="{active:number===rankingPage}" @click="rankingPage=number">{{ number }}</button><button :disabled="rankingPage===rankingTotalPages" @click="rankingPage++">下一页</button></div></div>
     </section>
 
+    <ClassMetricAnalysis v-show="activeView==='classAnalysis'" :models="projectModels" :colors="colors" />
+
     <el-dialog v-model="uploadVisible" title="增加已训练模型" width="560px" :close-on-click-modal="false">
       <p class="dialog-note">这里只保存已经完成训练的模型，不提供云训练功能。</p>
       <el-form label-position="top">
@@ -67,7 +70,7 @@
         <div class="form-row"><el-form-item label="框架"><el-select v-model="uploadForm.framework"><el-option label="PyTorch" value="PyTorch"/><el-option label="PaddlePaddle" value="PaddlePaddle"/><el-option label="ONNX" value="ONNX"/></el-select></el-form-item><el-form-item label="综合得分（可选）"><el-input v-model="uploadForm.score" placeholder="例如：91.5" /></el-form-item></div>
         <el-form-item label="模型文件"><input ref="modelFile" type="file" accept=".pt,.pth,.pdparams,.onnx" @change="pickModel"><div v-if="uploadForm.file" class="file-name">{{ uploadForm.file.name }} · {{ formatSize(uploadForm.file.size) }}</div></el-form-item>
         <el-form-item label="训练结果 results.csv（推荐）"><input type="file" accept=".csv,text/csv" @change="pickResultsCsv"><div v-if="uploadForm.metricsFile" class="file-name">{{ uploadForm.metricsFile.name }} · 将自动读取精确率、召回率、mAP 和损失曲线</div><small class="field-help">请选择 Ultralytics 训练输出目录中的 results.csv。</small></el-form-item>
-        <el-form-item label="指标 JSON（可选，兼容其他训练框架）"><el-input v-model="uploadForm.metrics" type="textarea" :rows="5" placeholder='{"precision":[0.4,0.6],"small_sample":[{"class":"HM","instances":7,"baseline":0.492,"strpn":0.589}]}' /><input type="file" accept=".json" @change="loadMetricsFile"></el-form-item>
+        <el-form-item label="指标 JSON（可多选，自动合并）"><el-input v-model="uploadForm.metrics" type="textarea" :rows="5" placeholder='{"small_sample":[...],"class_metrics":[...]}' /><input type="file" accept=".json,application/json" multiple @change="loadMetricsFile"><small class="field-help">可以同时选择小样本 JSON 和类别指标 JSON，系统会按顶层字段自动合并；缺少 F1 时会自动计算。</small></el-form-item>
       </el-form>
       <template #footer><el-button @click="uploadVisible=false">取消</el-button><el-button type="primary" :loading="uploading" @click="upload">保存模型</el-button></template>
     </el-dialog>
@@ -79,7 +82,7 @@
         <div class="form-row"><el-form-item label="框架"><el-select v-model="editForm.framework"><el-option label="PyTorch" value="PyTorch"/><el-option label="PaddlePaddle" value="PaddlePaddle"/><el-option label="ONNX" value="ONNX"/></el-select></el-form-item><el-form-item label="综合得分（可选）"><el-input v-model="editForm.score" /></el-form-item></div>
         <div class="form-row"><el-form-item label="训练日期"><el-date-picker v-model="editForm.trainingDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" /></el-form-item><el-form-item label="训练轮数"><el-input v-model="editForm.trainingEpochs" type="number" min="1" step="1" placeholder="例如：100" /></el-form-item></div>
         <el-form-item label="重新导入 results.csv（可选）"><input type="file" accept=".csv,text/csv" @change="pickEditResultsCsv"><div v-if="editForm.metricsFile" class="file-name">{{ editForm.metricsFile.name }} · 将更新训练曲线</div></el-form-item>
-        <el-form-item label="指标 JSON"><el-input v-model="editForm.metrics" type="textarea" :rows="8" /><input type="file" accept=".json" @change="loadEditMetricsFile"><small class="field-help">可直接修改内容，或重新选择指标 JSON 文件。</small></el-form-item>
+        <el-form-item label="指标 JSON（可多选，自动合并）"><el-input v-model="editForm.metrics" type="textarea" :rows="8" /><input type="file" accept=".json,application/json" multiple @change="loadEditMetricsFile"><small class="field-help">可同时选择 small_sample 和 class_metrics 两个 JSON，合并后仍可直接修改内容。</small></el-form-item>
       </el-form>
       <template #footer><el-button @click="editVisible=false">取消</el-button><el-button type="primary" :loading="editing" @click="saveEdit">保存修改</el-button></template>
     </el-dialog>
@@ -89,9 +92,10 @@
 <script>
 import MetricChart from '@/components/MetricChart.vue'
 import SmallSampleChart from '@/components/SmallSampleChart.vue'
+import ClassMetricAnalysis from '@/components/ClassMetricAnalysis.vue'
 import { addModel, getProject, removeModel, updateModel } from '@/api/modelRank'
 export default {
-  name: 'ModelProjectDetail', components: { MetricChart, SmallSampleChart },
+  name: 'ModelProjectDetail', components: { MetricChart, SmallSampleChart, ClassMetricAnalysis },
   data: () => ({ project:null, activeView:'charts', keyword:'', selected:[], rankingSortKey:'map5095', rankingSortDirection:'desc', rankingPage:1, rankingPageSize:10, uploadVisible:false, uploading:false, editVisible:false, editing:false, colors:['#18a4c4','#8b5bd9','#ed8b2f','#35a86c','#ec5269','#527ce8'], open:{metrics:true,loss:true}, uploadForm:{name:'',framework:'PyTorch',score:'',file:null,metricsFile:null,metrics:''}, editForm:{id:'',name:'',framework:'PyTorch',score:'',trainingDate:'',trainingEpochs:'',metricsFile:null,metrics:''}, baseRankingColumns:[{key:'name',label:'模型',type:'model'},{key:'framework',label:'框架',type:'text'},{key:'precision',label:'精确率',type:'metric'},{key:'recall',label:'召回率',type:'metric'},{key:'map50',label:'mAP@50',type:'metric'},{key:'map5095',label:'mAP@50-95',type:'metric'}], trailingRankingColumns:[{key:'score',label:'得分',type:'text'},{key:'epochs',label:'轮数',type:'text'},{key:'date',label:'日期',type:'text'}], metricCharts:[{key:'precision',title:'精确率（Precision）'},{key:'recall',title:'召回率（Recall）'},{key:'map50',title:'mAP@50'},{key:'map5095',title:'mAP@50-95'}], lossCharts:[{key:'box_loss',title:'定位损失（box_loss）'},{key:'cls_loss',title:'分类损失（cls_loss）'},{key:'dfl_loss',title:'分布焦点损失（dfl_loss）'}] }),
   computed: {
     projectModels(){return this.project&&Array.isArray(this.project.models)?this.project.models:[]},
@@ -125,23 +129,29 @@ export default {
     toggleAll(){ const ids=this.filteredModels.map(item=>item.id); this.selected=this.allSelected?this.selected.filter(id=>!ids.includes(id)):[...new Set([...this.selected,...ids])] },
     pickModel(event){ this.uploadForm.file=event.target.files[0]; if(this.uploadForm.file && !this.uploadForm.name) this.uploadForm.name=this.uploadForm.file.name.replace(/\.[^.]+$/,'') },
     pickResultsCsv(event){ this.uploadForm.metricsFile=event.target.files[0] || null },
-    loadMetricsFile(event){ const file=event.target.files[0]; if(!file)return; const reader=new FileReader(); reader.onload=()=>{this.uploadForm.metrics=reader.result}; reader.readAsText(file) },
+    loadMetricsFile(event){return this.mergeMetricsFiles(event,this.uploadForm)},
     openEdit(model){this.editForm={id:model.id,name:model.name,framework:model.framework||'PyTorch',score:model.score||'',trainingDate:model.training_date||'',trainingEpochs:model.training_epochs||'',metricsFile:null,metrics:JSON.stringify(model.metrics||{},null,2)};this.editVisible=true},
     pickEditResultsCsv(event){this.editForm.metricsFile=event.target.files[0]||null},
-    loadEditMetricsFile(event){const file=event.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{this.editForm.metrics=reader.result};reader.readAsText(file)},
+    loadEditMetricsFile(event){return this.mergeMetricsFiles(event,this.editForm)},
+    readFileText(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsText(file)})},
+    async mergeMetricsFiles(event,target){
+      const files=Array.from(event.target.files||[]);if(!files.length)return
+      try{const merged=target.metrics.trim()?JSON.parse(target.metrics):{};for(const file of files){const value=JSON.parse(await this.readFileText(file));if(!value||Array.isArray(value)||typeof value!=='object')throw new Error(`${file.name} 顶层必须是 JSON 对象`);Object.assign(merged,value)}target.metrics=JSON.stringify(merged,null,2);this.$message.success(`已合并 ${files.length} 个指标 JSON 文件`)}catch(error){this.$message.error(`JSON 合并失败：${error.message}`)}finally{event.target.value=''}
+    },
     async saveEdit(){
       if(!this.editForm.name.trim())return this.$message.warning('请输入模型名称')
       let metrics={};try{metrics=JSON.parse(this.editForm.metrics||'{}')}catch(e){return this.$message.error('指标 JSON 格式不正确')}
       const data=new FormData();data.append('name',this.editForm.name);data.append('framework',this.editForm.framework);data.append('score',this.editForm.score);data.append('training_date',this.editForm.trainingDate||'');data.append('training_epochs',this.editForm.trainingEpochs||'');data.append('metrics',JSON.stringify(metrics));if(this.editForm.metricsFile)data.append('metrics_file',this.editForm.metricsFile);this.editing=true
-      try{const res=await updateModel(this.project.id,this.editForm.id,data);this.editVisible=false;await this.load();const smallSample=res.data.data.metrics&&res.data.data.metrics.small_sample;if(!smallSample||!smallSample.length)this.$message.warning('修改已保存，但指标 JSON 中未识别到小样本类别数据');else this.$message.success('模型修改成功')}finally{this.editing=false}
+      try{const res=await updateModel(this.project.id,this.editForm.id,data);this.editVisible=false;await this.load();if(!this.hasCategoryMetrics(res.data.data.metrics))this.$message.warning('修改已保存，但指标 JSON 中未识别到小样本或类别级指标数据');else this.$message.success('模型修改成功')}finally{this.editing=false}
     },
     async upload(){
       if(!this.uploadForm.file)return this.$message.warning('请选择已训练好的模型文件')
       let metrics={}; if(this.uploadForm.metrics.trim()){try{metrics=JSON.parse(this.uploadForm.metrics)}catch(e){return this.$message.error('指标 JSON 格式不正确')}}
       const data=new FormData(); data.append('model',this.uploadForm.file); data.append('name',this.uploadForm.name); data.append('framework',this.uploadForm.framework); data.append('score',this.uploadForm.score); data.append('metrics',JSON.stringify(metrics)); if(this.uploadForm.metricsFile)data.append('metrics_file',this.uploadForm.metricsFile); this.uploading=true
-      try{const res=await addModel(this.project.id,data); this.uploadVisible=false; this.uploadForm={name:'',framework:'PyTorch',score:'',file:null,metricsFile:null,metrics:''}; await this.load(); const smallSample=res.data.data.metrics&&res.data.data.metrics.small_sample; if(!smallSample||!smallSample.length)this.$message.warning('模型已保存，但指标 JSON 中未识别到小样本类别数据'); else this.$message.success('模型和训练指标已保存')}finally{this.uploading=false}
+      try{const res=await addModel(this.project.id,data); this.uploadVisible=false; this.uploadForm={name:'',framework:'PyTorch',score:'',file:null,metricsFile:null,metrics:''}; await this.load(); if(!this.hasCategoryMetrics(res.data.data.metrics))this.$message.warning('模型已保存，但指标 JSON 中未识别到小样本或类别级指标数据'); else this.$message.success('模型和训练指标已保存')}finally{this.uploading=false}
     },
     async remove(model){ try{await this.$confirm(`确认删除模型“${model.name}”吗？`,'删除模型',{type:'warning'}); await removeModel(this.project.id,model.id); await this.load()}catch(e){/* 用户取消 */} },
+    hasCategoryMetrics(metrics){return Boolean(metrics&&((Array.isArray(metrics.small_sample)&&metrics.small_sample.length)||(Array.isArray(metrics.class_metrics)&&metrics.class_metrics.length)))},
     formatSize(size){return size<1048576?`${(size/1024).toFixed(1)} KB`:`${(size/1048576).toFixed(1)} MB`},
     formatDate(value){return value?value.replace('T',' '):'—'}
   }

@@ -153,6 +153,106 @@ def _small_sample_rows(raw):
     return find_table(candidate) if candidate is not None else find_table(raw)
 
 
+def _normalized_key(value):
+    return ''.join(character.lower() for character in str(value) if character.isalnum())
+
+
+CLASS_METRIC_FIELDS = {
+    'class': ('class', 'classname', 'category', 'categoryname', 'name'),
+    'images': ('images', 'imagecount', 'imgs'),
+    'instances': ('instances', 'instancecount', 'count', 'targets', 'support', 'samples', 'n'),
+    'ap50': ('ap50', 'map50', 'ap050', 'map050'),
+    'ap5095': ('ap5095', 'map5095', 'ap050095', 'map050095', 'ap50to95', 'map50to95'),
+    'precision': ('precision', 'prec', 'p'),
+    'recall': ('recall', 'rec', 'r'),
+    'f1': ('f1', 'f1score')
+}
+
+
+def _class_metric_rows(raw):
+    """Find row- or column-oriented per-class evaluation metrics."""
+    containers = {
+        'classmetrics', 'perclass', 'perclassmetrics', 'categorymetrics',
+        'classresults', 'percategory', 'percategorymetrics'
+    }
+    normalized_root = {_normalized_key(key): value for key, value in raw.items()}
+    candidate = next((normalized_root[key] for key in containers if key in normalized_root), None)
+    class_aliases = set(CLASS_METRIC_FIELDS['class'])
+    metric_aliases = set().union(*(set(CLASS_METRIC_FIELDS[key]) for key in ('ap50', 'ap5095', 'precision', 'recall', 'f1')))
+
+    def find_table(value):
+        if isinstance(value, list):
+            rows = [item for item in value if isinstance(item, dict)]
+            keys = {_normalized_key(key) for item in rows for key in item}
+            if rows and keys.intersection(class_aliases) and keys.intersection(metric_aliases):
+                return rows
+        if isinstance(value, dict):
+            normalized = {_normalized_key(key): item for key, item in value.items()}
+            class_key = next((key for key in class_aliases if isinstance(normalized.get(key), list)), None)
+            metric_key = next((key for key in metric_aliases if isinstance(normalized.get(key), list)), None)
+            if class_key and metric_key:
+                length = len(normalized[class_key])
+                return [
+                    {key: values[index] for key, values in normalized.items()
+                     if isinstance(values, list) and index < len(values)}
+                    for index in range(length)
+                ]
+            for nested in value.values():
+                found = find_table(nested)
+                if found:
+                    return found
+        return []
+
+    return find_table(candidate) if candidate is not None else find_table(raw)
+
+
+def _class_metric_value(normalized, field):
+    for alias in CLASS_METRIC_FIELDS[field]:
+        if alias in normalized and normalized[alias] not in (None, ''):
+            return normalized[alias]
+    return None
+
+
+def _metric_number(value):
+    if value in (None, ''):
+        return None
+    text = str(value).strip()
+    percent = text.endswith('%')
+    number = float(text[:-1] if percent else text)
+    if percent or 1 < number <= 100:
+        number /= 100
+    if not 0 <= number <= 1:
+        return None
+    return round(number, 6)
+
+
+def _clean_class_metrics(raw):
+    cleaned = []
+    for item in _class_metric_rows(raw)[:500]:
+        normalized = {_normalized_key(key): value for key, value in item.items()}
+        class_name = str(_class_metric_value(normalized, 'class') or '').strip()[:80]
+        if not class_name:
+            continue
+        try:
+            images_value = _class_metric_value(normalized, 'images')
+            images = max(0, int(float(images_value))) if images_value not in (None, '') else None
+            instances_value = _class_metric_value(normalized, 'instances')
+            instances = max(0, int(float(instances_value))) if instances_value not in (None, '') else 0
+            values = {
+                key: _metric_number(_class_metric_value(normalized, key))
+                for key in ('ap50', 'ap5095', 'precision', 'recall', 'f1')
+            }
+        except (TypeError, ValueError):
+            continue
+        if values['f1'] is None and values['precision'] is not None and values['recall'] is not None:
+            denominator = values['precision'] + values['recall']
+            values['f1'] = round(2 * values['precision'] * values['recall'] / denominator, 6) if denominator else 0
+        if not any(value is not None for value in values.values()):
+            continue
+        cleaned.append({'class': class_name, 'images': images, 'instances': instances, **values})
+    return cleaned
+
+
 def _clean_metrics(raw, model_name=''):
     metrics = {}
     if not isinstance(raw, dict):
@@ -192,6 +292,9 @@ def _clean_metrics(raw, model_name=''):
                                 'baseline_label': baseline_label, 'strpn': result, 'result_label': label})
         if cleaned:
             metrics['small_sample'] = cleaned
+    class_metrics = _clean_class_metrics(raw)
+    if class_metrics:
+        metrics['class_metrics'] = class_metrics
     return metrics
 
 
