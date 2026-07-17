@@ -168,4 +168,7 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 
+# One-time marker created after legacy model-rank JSON is imported into MySQL.
+static/model_library/.projects_json_migrated
+
 # End of https://www.toptal.com/developers/gitignore/api/flask

@@ -1,12 +1,15 @@
+import os
+
 import pymysql
 import sqlparse
 from dotenv import dotenv_values
 
-config = dotenv_values('.flaskenv')
+BACKEND_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+config = dotenv_values(os.path.join(BACKEND_ROOT, '.flaskenv'))
 # MySql配置信息
 HOST = config.get('MYSQL_HOST') or '127.0.0.1'
 PORT = config.get('MYSQL_PORT') or 3306
-DATABASE = config.get('MYSQL_DATABASE') or 'AdminFlask'
+DATABASE = config.get('MYSQL_DATABASE') or 'paddle_rs'
 USERNAME = config.get('MYSQL_USERNAME') or 'root'
 PASSWORD = config.get('MYSQL_PASSWORD') or '123456'
 
@@ -72,5 +75,5 @@ def init_db():
         return
     if init_database():
         print('数据库%s创建成功' % str(DATABASE))
-    execute_fromfile('init_db.sql')
+    execute_fromfile(os.path.join(BACKEND_ROOT, 'init_db.sql'))
     print('表创建成功')

@@ -11,11 +11,13 @@ from flask import Blueprint, current_app, request
 from werkzeug.utils import secure_filename
 
 from applications.common.utils.http import fail_api, success_api
+from applications.extensions import db
+from applications.models.model_rank import ModelProject, ModelRecord
 
 model_rank_api = Blueprint('model_rank_api', __name__, url_prefix='/api/model-rank')
 _lock = threading.Lock()
 ALLOWED_MODEL_EXTENSIONS = {'.pt', '.pth', '.pdparams', '.onnx'}
-METRIC_KEYS = ('precision', 'recall', 'map50', 'map5095', 'box_loss', 'cls_loss', 'dfl_loss')
+METRIC_KEYS = ('precision', 'recall', 'map50', 'map5095', 'box_loss', 'cls_loss', 'dfl_loss', 'epochs')
 CSV_COLUMN_ALIASES = {
     'precision': ('metrics/precision(B)', 'metrics/precision', 'precision'),
     'recall': ('metrics/recall(B)', 'metrics/recall', 'recall'),
@@ -37,27 +39,121 @@ def _index_path():
     return os.path.join(_root(), 'projects.json')
 
 
-def _read_projects():
-    path = _index_path()
-    if not os.path.exists(path):
-        return []
-    with open(path, 'r', encoding='utf-8') as file:
-        return json.load(file)
+def _migration_marker_path():
+    return os.path.join(_root(), '.projects_json_migrated')
+
+
+def _parse_datetime(value):
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return datetime.now()
 
 
 def _write_projects(projects):
+    """Persist the legacy dictionary shape into relational project/model tables."""
+    try:
+        ModelRecord.query.delete()
+        ModelProject.query.delete()
+        db.session.flush()
+        for item in projects:
+            project = ModelProject(
+                id=item['id'], name=item.get('name', ''), description=item.get('description', ''),
+                created_at=_parse_datetime(item.get('created_at')),
+                updated_at=_parse_datetime(item.get('updated_at'))
+            )
+            db.session.add(project)
+            db.session.flush()
+            for model in item.get('models', []):
+                epochs = model.get('training_epochs')
+                record = ModelRecord(
+                    id=model['id'], project_id=item['id'], name=model.get('name', ''),
+                    filename=model.get('filename', ''), stored_filename=model.get('stored_filename', ''),
+                    size=int(model.get('size') or 0), framework=model.get('framework', 'PyTorch'),
+                    score=str(model.get('score', '')), training_date=model.get('training_date', ''),
+                    training_epochs=int(epochs) if str(epochs or '').isdigit() else None,
+                    metrics=model.get('metrics') or {}, created_at=_parse_datetime(model.get('created_at'))
+                )
+                db.session.add(record)
+                # Large metric JSON documents must be inserted separately. Without an
+                # explicit flush SQLAlchemy combines every model into one huge INSERT,
+                # which can stall MariaDB and block all API reads during migration.
+                db.session.flush()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+
+def _migrate_legacy_projects():
     path = _index_path()
-    temporary = path + '.tmp'
-    with open(temporary, 'w', encoding='utf-8') as file:
-        json.dump(projects, file, ensure_ascii=False, indent=2)
-    os.replace(temporary, path)
+    marker = _migration_marker_path()
+    if os.path.exists(marker) or not os.path.exists(path):
+        return
+    if ModelProject.query.count() == 0:
+        with open(path, 'r', encoding='utf-8') as file:
+            legacy_projects = json.load(file)
+        if isinstance(legacy_projects, list) and legacy_projects:
+            _write_projects(legacy_projects)
+    with open(marker, 'w', encoding='utf-8') as file:
+        file.write(datetime.now().isoformat(timespec='seconds'))
+
+
+def _read_projects():
+    _migrate_legacy_projects()
+    projects = []
+    for project in ModelProject.query.order_by(ModelProject.created_at.asc()).all():
+        projects.append({
+            'id': project.id, 'name': project.name, 'description': project.description or '',
+            'created_at': project.created_at.isoformat(timespec='seconds'),
+            'updated_at': project.updated_at.isoformat(timespec='seconds'),
+            'models': [{
+                'id': model.id, 'name': model.name, 'filename': model.filename,
+                'stored_filename': model.stored_filename, 'size': model.size or 0,
+                'framework': model.framework or 'PyTorch', 'score': model.score or '',
+                'training_date': model.training_date or '',
+                'training_epochs': str(model.training_epochs) if model.training_epochs else '',
+                'created_at': model.created_at.isoformat(timespec='seconds'),
+                'metrics': model.metrics or {}
+            } for model in project.model_records]
+        })
+    return projects
 
 
 def _find_project(projects, project_id):
     return next((item for item in projects if item['id'] == project_id), None)
 
 
-def _clean_metrics(raw):
+def _small_sample_rows(raw):
+    """Find row- or column-oriented small-sample data in a metrics JSON object."""
+    aliases = ('small_sample', 'smallSample', 'small_sample_classes', 'small_sample_changes',
+               'small_sample_class_changes', 'class_changes')
+    candidate = next((raw[key] for key in aliases if key in raw), None)
+
+    def find_table(value):
+        if isinstance(value, list) and any(isinstance(item, dict) for item in value):
+            keys = {str(key).strip().lower() for item in value if isinstance(item, dict) for key in item}
+            if keys.intersection({'class', 'class_name', 'category'}) and keys.intersection({'baseline', 'base', 'yolo26'}):
+                return value
+        if isinstance(value, dict):
+            normalized = {str(key).strip().lower(): item for key, item in value.items()}
+            class_key = next((key for key in ('class', 'class_name', 'category') if isinstance(normalized.get(key), list)), None)
+            baseline_key = next((key for key in ('baseline', 'base', 'yolo26') if isinstance(normalized.get(key), list)), None)
+            if class_key and baseline_key:
+                length = min(len(normalized[class_key]), len(normalized[baseline_key]))
+                return [{key: values[index] for key, values in normalized.items() if isinstance(values, list) and index < len(values)} for index in range(length)]
+            for nested in value.values():
+                found = find_table(nested)
+                if found:
+                    return found
+        return []
+
+    return find_table(candidate) if candidate is not None else find_table(raw)
+
+
+def _clean_metrics(raw, model_name=''):
     metrics = {}
     if not isinstance(raw, dict):
         return metrics
@@ -65,6 +161,37 @@ def _clean_metrics(raw):
         values = raw.get(key, [])
         if isinstance(values, list):
             metrics[key] = [round(float(value), 6) for value in values if isinstance(value, (int, float))][:1000]
+    small_sample = _small_sample_rows(raw)
+    if small_sample:
+        cleaned = []
+        for item in small_sample[:100]:
+            if not isinstance(item, dict):
+                continue
+            normalized = {str(key).strip().lower(): value for key, value in item.items()}
+            try:
+                class_name = str(normalized.get('class', normalized.get('class_name', normalized.get('category', '')))).strip()[:60]
+                instances = int(normalized.get('instances', normalized.get('instance_count', normalized.get('count', 0))))
+                baseline_key = next((key for key in ('baseline', 'base', 'yolo26') if isinstance(normalized.get(key), (int, float))), None)
+                baseline = round(float(normalized.get(baseline_key)), 6)
+                ignored = {'class', 'class_name', 'category', 'instances', 'instance_count', 'count',
+                           'baseline', 'base', 'yolo26', 'change', 'improve', 'trend'}
+                candidates = [key for key, value in normalized.items() if key not in ignored and isinstance(value, (int, float))]
+                normalized_model_name = ''.join(character for character in model_name.lower() if character.isalnum())
+                result_key = next((key for key in candidates if ''.join(character for character in key if character.isalnum()) in normalized_model_name), None)
+                if not result_key:
+                    result_key = next((key for key in ('strpn', 'result', 'value', 'score') if key in candidates), None)
+                if not result_key:
+                    result_key = candidates[0] if len(candidates) == 1 else None
+                result = round(float(normalized.get(result_key)), 6)
+            except (TypeError, ValueError):
+                continue
+            if class_name and 0 <= instances < 100:
+                label = str(normalized.get('result_label', '')).strip() or ('ST-RPN' if result_key == 'strpn' else str(result_key).replace('_', '-').upper())
+                baseline_label = str(normalized.get('baseline_label', '')).strip() or ('YOLO26' if baseline_key == 'yolo26' else '基线')
+                cleaned.append({'class': class_name, 'instances': instances, 'baseline': baseline,
+                                'baseline_label': baseline_label, 'strpn': result, 'result_label': label})
+        if cleaned:
+            metrics['small_sample'] = cleaned
     return metrics
 
 
@@ -84,10 +211,20 @@ def _metrics_from_csv(upload):
         matched = next((normalized_fields[alias] for alias in aliases if alias in normalized_fields), None)
         if matched:
             columns[metric] = matched
+    epoch_column = next((normalized_fields[name] for name in ('epoch', 'Epoch', 'epochs') if name in normalized_fields), None)
     if not columns:
         raise ValueError('未识别到 Ultralytics 指标列')
     metrics = {key: [] for key in columns}
+    if epoch_column:
+        metrics['epochs'] = []
     for row in reader:
+        if epoch_column:
+            value = str(row.get(epoch_column, '')).strip()
+            if value:
+                try:
+                    metrics['epochs'].append(round(float(value), 6))
+                except ValueError:
+                    pass
         for metric, column in columns.items():
             value = str(row.get(column, '')).strip()
             if value:
@@ -157,7 +294,7 @@ def model_upload(project_id):
     if len(model_name) > 80:
         return fail_api('模型名称不能超过80个字符')
     try:
-        metrics = _clean_metrics(json.loads(request.form.get('metrics', '{}')))
+        metrics = _clean_metrics(json.loads(request.form.get('metrics', '{}')), model_name)
     except (TypeError, ValueError, json.JSONDecodeError):
         return fail_api('指标数据不是有效的 JSON')
     metrics_file = request.files.get('metrics_file')
@@ -165,7 +302,12 @@ def model_upload(project_id):
         if os.path.splitext(metrics_file.filename)[1].lower() != '.csv':
             return fail_api('训练指标文件必须是 results.csv')
         try:
-            metrics.update(_metrics_from_csv(metrics_file))
+            csv_metrics = _metrics_from_csv(metrics_file)
+            for key, values in csv_metrics.items():
+                # JSON 与 results.csv 同时提供同一指标时，保留更完整的序列，
+                # 避免较短的汇总 CSV 覆盖 JSON 中完整的训练轮次。
+                if len(values) >= len(metrics.get(key, [])):
+                    metrics[key] = values
         except (ValueError, UnicodeError) as error:
             return fail_api('无法解析 results.csv：{}'.format(str(error)))
     model_id = uuid.uuid4().hex[:12]
@@ -196,6 +338,64 @@ def model_upload(project_id):
         project['updated_at'] = now
         _write_projects(projects)
     return success_api(msg='模型添加成功', data=model)
+
+
+@model_rank_api.patch('/projects/<string:project_id>/models/<string:model_id>')
+def model_update(project_id, model_id):
+    projects = _read_projects()
+    project = _find_project(projects, project_id)
+    if not project:
+        return fail_api('项目不存在')
+    model = next((item for item in project['models'] if item['id'] == model_id), None)
+    if not model:
+        return fail_api('模型不存在')
+
+    model_name = str(request.form.get('name', model['name'])).strip()
+    if not model_name or len(model_name) > 80:
+        return fail_api('模型名称不能为空且不能超过80个字符')
+    training_date = str(request.form.get('training_date', model.get('training_date', ''))).strip()[:20]
+    training_epochs = str(request.form.get('training_epochs', model.get('training_epochs', ''))).strip()
+    if training_epochs:
+        try:
+            epoch_number = int(training_epochs)
+            if epoch_number <= 0 or epoch_number > 100000:
+                raise ValueError
+            training_epochs = str(epoch_number)
+        except ValueError:
+            return fail_api('训练轮数必须是大于0的整数')
+    metrics = model.get('metrics', {})
+    if 'metrics' in request.form:
+        try:
+            metrics = _clean_metrics(json.loads(request.form.get('metrics') or '{}'), model_name)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return fail_api('指标数据不是有效的 JSON')
+    metrics_file = request.files.get('metrics_file')
+    if metrics_file and metrics_file.filename:
+        if os.path.splitext(metrics_file.filename)[1].lower() != '.csv':
+            return fail_api('训练指标文件必须是 results.csv')
+        try:
+            csv_metrics = _metrics_from_csv(metrics_file)
+            for key, values in csv_metrics.items():
+                if len(values) >= len(metrics.get(key, [])):
+                    metrics[key] = values
+        except (ValueError, UnicodeError) as error:
+            return fail_api('无法解析 results.csv：{}'.format(str(error)))
+
+    with _lock:
+        projects = _read_projects()
+        project = _find_project(projects, project_id)
+        model = next((item for item in project['models'] if item['id'] == model_id), None) if project else None
+        if not model:
+            return fail_api('模型不存在')
+        model['name'] = model_name
+        model['framework'] = str(request.form.get('framework', model.get('framework', 'PyTorch'))).strip()[:40]
+        model['score'] = str(request.form.get('score', model.get('score', ''))).strip()[:30]
+        model['training_date'] = training_date
+        model['training_epochs'] = training_epochs
+        model['metrics'] = metrics
+        project['updated_at'] = datetime.now().isoformat(timespec='seconds')
+        _write_projects(projects)
+    return success_api(msg='模型修改成功', data=model)
 
 
 @model_rank_api.delete('/projects/<string:project_id>/models/<string:model_id>')

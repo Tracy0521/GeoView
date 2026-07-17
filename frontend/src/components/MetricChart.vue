@@ -11,7 +11,7 @@
         <line class="axis" x1="55" x2="55" y1="18" y2="193" />
         <g class="labels">
           <text v-for="tick in yTicks" :key="'yl'+tick.y" x="47" :y="tick.y+4" class="y-label">{{ formatTick(tick.value) }}</text>
-          <text v-for="tick in xTicks" :key="'xl'+tick.value" :x="tick.x" y="211">{{ tick.value }}</text>
+          <text v-for="tick in xTicks" :key="'xl'+tick.value" :x="tick.x" y="211">{{ formatEpoch(tick.value) }}</text>
           <text x="240" y="232" class="axis-title">轮次（Epoch）</text>
         </g>
         <polyline v-for="line in drawableLines" :key="line.id" :points="line.points" :stroke="line.color" />
@@ -22,7 +22,7 @@
         <text v-if="!lines.length" x="240" y="108" class="empty">请选择包含指标数据的模型</text>
       </svg>
       <div v-if="hoverIndex!==null && hoverValues.length" class="tooltip" :class="{ right: tooltipRight }" :style="tooltipStyle">
-        <strong>轮次：{{ hoverIndex }}</strong>
+          <strong>轮次：{{ formatEpoch(hoverIndex) }}</strong>
         <div v-for="item in hoverValues" :key="item.id"><i :style="{background:item.color}" /><span>{{ item.name }}</span><b>{{ formatValue(item.value) }}</b></div>
       </div>
     </div>
@@ -36,7 +36,9 @@ export default {
   data: () => ({ hoverIndex: null, pointerPercent: 0 }),
   computed: {
     allValues() { return this.lines.flatMap(item => item.values || []).filter(Number.isFinite) },
-    maxEpoch() { return Math.max(0, ...this.lines.map(item => Math.max((item.values || []).length - 1, 0))) },
+    epochValues() { return this.lines.flatMap(line => this.lineEpochs(line)) },
+    minEpoch() { return this.epochValues.length ? Math.min(...this.epochValues) : 0 },
+    maxEpoch() { return this.epochValues.length ? Math.max(...this.epochValues) : 1 },
     bounds() {
       if (!this.allValues.length) return { min: 0, max: 1 }
       let min = Math.min(...this.allValues), max = Math.max(...this.allValues)
@@ -46,19 +48,21 @@ export default {
       return { min, max }
     },
     yTicks() { return Array.from({length:6}, (_,i) => ({value:this.bounds.max-(this.bounds.max-this.bounds.min)*i/5,y:18+i*35})) },
-    xTicks() { const max=this.maxEpoch||1; return Array.from({length:6},(_,i)=>({value:Math.round(max*i/5),x:55+i*74})) },
-    drawableLines() { return this.lines.filter(line=>line.values&&line.values.length).map(line=>({...line,points:line.values.map((value,index)=>`${this.indexX(index).toFixed(1)},${this.valueY(value).toFixed(1)}`).join(' ')})) },
-    hoverX() { return this.indexX(this.hoverIndex||0) },
-    hoverValues() { if(this.hoverIndex===null)return[]; return this.lines.filter(line=>line.values&&Number.isFinite(line.values[this.hoverIndex])).map(line=>({id:line.id,name:line.name,color:line.color,value:line.values[this.hoverIndex]})) },
+    xTicks() { return Array.from({length:6},(_,i)=>({value:this.minEpoch+(this.maxEpoch-this.minEpoch)*i/5,x:55+i*74})) },
+    drawableLines() { return this.lines.filter(line=>line.values&&line.values.length).map(line=>({...line,points:line.values.map((value,index)=>`${this.epochX(this.lineEpochs(line)[index]).toFixed(1)},${this.valueY(value).toFixed(1)}`).join(' ')})) },
+    hoverX() { return this.epochX(this.hoverIndex===null?this.minEpoch:this.hoverIndex) },
+    hoverValues() { if(this.hoverIndex===null)return[]; return this.lines.flatMap(line=>{const epochs=this.lineEpochs(line);const index=epochs.findIndex(epoch=>Math.abs(epoch-this.hoverIndex)<1e-6);return index>=0&&Number.isFinite(line.values[index])?[{id:line.id,name:line.name,color:line.color,value:line.values[index]}]:[]}).sort((left,right)=>right.value-left.value) },
     tooltipRight() { return this.pointerPercent>62 },
     tooltipStyle() { return this.tooltipRight?{right:`${Math.max(3,100-this.pointerPercent+2)}%`}:{left:`${Math.min(78,this.pointerPercent+2)}%`} }
   },
   methods: {
-    indexX(index) { return 55+(index/Math.max(this.maxEpoch,1))*370 },
+    lineEpochs(line) { return Array.isArray(line.epochs)&&line.epochs.length===line.values.length?line.epochs:line.values.map((_,index)=>index) },
+    epochX(epoch) { return 55+((epoch-this.minEpoch)/Math.max(this.maxEpoch-this.minEpoch,1))*370 },
     valueY(value) { return 193-((value-this.bounds.min)/(this.bounds.max-this.bounds.min||1))*175 },
-    handleMove(event) { if(!this.allValues.length)return; const rect=this.$refs.svg.getBoundingClientRect(); const viewX=(event.clientX-rect.left)/rect.width*440; const clamped=Math.max(55,Math.min(425,viewX)); this.hoverIndex=Math.round((clamped-55)/370*this.maxEpoch); this.pointerPercent=(event.clientX-rect.left)/rect.width*100 },
+    handleMove(event) { if(!this.allValues.length)return; const rect=this.$refs.svg.getBoundingClientRect(); const viewX=(event.clientX-rect.left)/rect.width*440; const clamped=Math.max(55,Math.min(425,viewX)); const target=this.minEpoch+(clamped-55)/370*(this.maxEpoch-this.minEpoch); this.hoverIndex=this.epochValues.reduce((nearest,epoch)=>Math.abs(epoch-target)<Math.abs(nearest-target)?epoch:nearest,this.epochValues[0]); this.pointerPercent=(event.clientX-rect.left)/rect.width*100 },
     formatTick(value) { const abs=Math.abs(value); return abs>=100?value.toFixed(0):abs>=1?value.toFixed(2):value.toFixed(3) },
-    formatValue(value) { return Number(value).toFixed(Math.abs(value)<0.1?5:4) }
+    formatValue(value) { return Number(value).toFixed(Math.abs(value)<0.1?5:4) },
+    formatEpoch(value) { return Number.isInteger(value)?value:Number(value).toFixed(1) }
   }
 }
 </script>

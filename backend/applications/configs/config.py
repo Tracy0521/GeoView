@@ -1,6 +1,11 @@
 import logging
 import os
 from urllib.parse import quote_plus
+from dotenv import load_dotenv
+
+
+BACKEND_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+load_dotenv(os.path.join(BACKEND_ROOT, '.flaskenv'))
 
 
 class BaseConfig:
@@ -25,10 +30,14 @@ class BaseConfig:
     MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD') or "123456"
     MYSQL_HOST = os.getenv('MYSQL_HOST') or "127.0.0.1"
     MYSQL_PORT = int(os.getenv('MYSQL_PORT') or 3306)
-    MYSQL_DATABASE = os.getenv('MYSQL_DATABASE') or "AdminFlask"
+    MYSQL_DATABASE = os.getenv('MYSQL_DATABASE') or "paddle_rs"
 
     # mysql 数据库的配置信息
     SQLALCHEMY_DATABASE_URI = f"mysql+pymysql://{MYSQL_USERNAME}:{quote_plus(MYSQL_PASSWORD)}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}?charset=utf8mb4"
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_pre_ping': True,
+        'connect_args': {'connect_timeout': 5, 'read_timeout': 30, 'write_timeout': 30}
+    }
     # 默认日志等级
     LOG_LEVEL = logging.WARN
     #
