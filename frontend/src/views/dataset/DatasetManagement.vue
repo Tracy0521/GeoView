@@ -86,23 +86,25 @@
         <article v-for="ds in datasets" :key="ds.id" class="dataset-card">
           <!-- 悬浮标注预览；点击缩略图进入详情 -->
           <div
-            class="thumb-wrap clickable"
-            @mouseenter="showPreview(ds)"
-            @mouseleave="hidePreview"
-            @click="openDataset(ds.id)"
+              class="thumb-wrap clickable"
+              @mouseenter="showPreview(ds)"
+              @mouseleave="hidePreview"
+              @click="openDataset(ds.id)"
           >
+            <!-- 适配新接口：优先取第一张图片，不再依赖 preview_url -->
             <img
-              v-if="ds.preview_url"
-              :src="fullUrl(ds.preview_url)"
-              :alt="ds.name"
-              class="thumb"
+                v-if="ds.images && ds.images.length"
+                :src="fullUrl(ds.images[0].url)"
+                :alt="ds.name"
+                class="thumb"
+                loading="lazy"
             >
             <div v-else class="thumb empty-thumb">暂无影像</div>
-            <!-- 悬浮时渲染检测框 -->
+            <!-- 悬浮时渲染检测框不变 -->
             <canvas
-              v-show="previewDatasetId === ds.id && previewReady"
-              ref="previewCanvas"
-              class="preview-canvas"
+                v-show="previewDatasetId === ds.id && previewReady"
+                ref="previewCanvas"
+                class="preview-canvas"
             />
           </div>
 

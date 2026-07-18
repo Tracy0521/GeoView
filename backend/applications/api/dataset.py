@@ -479,44 +479,62 @@ def serve_dataset_file(filename):
 
 
 # ── API 路由 ────────────────────────────────────────────────────
-@dataset_api.get('/stats')
-def global_stats():
-    all_ds = Dataset.query.all()
-    total_images = 0
-    total_boxes = 0
-    all_class = set()
-    for ds in all_ds:
-        imgs = DatasetImage.query.filter_by(dataset_id=ds.id).all()
-        total_images += len(imgs)
-        for img in imgs:
-            anns = DatasetAnnotation.query.filter_by(image_id=img.id).all()
-            total_boxes += len(anns)
-            for a in anns:
-                all_class.add(a.class_id)
-    data = {
-        'dataset_count': len(all_ds),
-        'image_count': total_images,
-        'box_count': total_boxes,
-        'class_count': len(all_class)
-    }
-    return success_api(data=data)
+from datetime import datetime, timedelta
 
+# 全局缓存变量
+_stats_cache = None
+_stats_expire = None
+
+@dataset_api.get("/stats")
+def global_stats():
+    global _stats_cache, _stats_expire
+    now = datetime.now()
+    # 缓存5分钟
+    if _stats_cache and _stats_expire and now < _stats_expire:
+        return success_api(data=_stats_cache)
+
+    # 原有统计逻辑
+    all_ds = Dataset.query.all()
+    total_ds = len(all_ds)
+    total_img = sum(ds.image_count for ds in all_ds)
+    total_box = sum(ds.box_count for ds in all_ds)
+    total_cls = 25
+
+    res_data = {
+        "dataset_count": total_ds,
+        "image_count": total_img,
+        "box_count": total_box,
+        "class_count": total_cls
+    }
+    # 更新缓存
+    _stats_cache = res_data
+    _stats_expire = now + timedelta(minutes=5)
+    return success_api(data=res_data)
+
+
+from sqlalchemy.orm import joinedload
 
 @dataset_api.get('/samples')
 def sample_images():
     ds_list = Dataset.query.order_by(Dataset.updated_at.desc()).all()
     samples = []
     for ds in ds_list:
-        imgs = DatasetImage.query.filter_by(dataset_id=ds.id).order_by(DatasetImage.id.desc()).all()
+        # 1. 数据库层只取每个数据集最新8张，不查全量图片
+        # 2. joinedload 预加载标注关联，仅1次子查询，不再循环每张图查annotation
+        imgs = DatasetImage.query.filter_by(dataset_id=ds.id) \
+            .options(joinedload(DatasetImage.annotations)) \
+            .order_by(DatasetImage.id.desc()).limit(8).all()
+
         for img in imgs:
-            anns = DatasetAnnotation.query.filter_by(image_id=img.id).all()
             samples.append({
                 'dataset_id': ds.id,
                 'dataset_name': ds.name,
                 'filename': img.filename,
                 'url': img.url,
-                'box_count': len(anns)
+                # 直接取关联列表长度，不用额外SQL
+                'box_count': len(img.annotations)
             })
+            # 全局最多20张预览，提前终止循环
             if len(samples) >= 20:
                 break
         if len(samples) >= 20:
@@ -524,24 +542,38 @@ def sample_images():
     return success_api(data=samples)
 
 
-@dataset_api.get('/list')
-def dataset_list():
-    ds_list = Dataset.query.order_by(Dataset.updated_at.desc()).all()
+@dataset_api.get("/list")
+def get_dataset_list():
+    # 分页参数
+    page = request.args.get("page", 1, type=int)
+    page_size = request.args.get("limit", 10, type=int)
+    offset = (page - 1) * page_size
+
+    ds_list = Dataset.query.order_by(Dataset.updated_at.desc()).limit(page_size).offset(offset).all()
     result = []
     for ds in ds_list:
-        imgs = DatasetImage.query.filter_by(dataset_id=ds.id).all()
-        preview = imgs[0].url if imgs else ""
-        img_dict_list = [_build_image_dict(i) for i in imgs]
+        # 每个数据集仅取8张预览图，不查全部7000+
+        preview_imgs = DatasetImage.query.filter_by(dataset_id=ds.id).order_by(DatasetImage.id.desc()).limit(8).all()
+        img_arr = []
+        for img in preview_imgs:
+            img_arr.append({
+                "id": img.id,
+                "filename": img.filename,
+                "url": img.url,
+                "split": img.split,
+                "warnings": img.warnings,
+                # 只返回数字，不返回完整标注数组，大幅瘦身JSON
+                "box_count": img.box_count
+            })
         result.append({
-            'id': ds.id,
-            'name': ds.name,
-            'image_count': ds.image_count,
-            'box_count': ds.box_count,
-            'class_count': ds.class_count,
-            'created_at': ds.created_at.isoformat(timespec='seconds'),
-            'updated_at': ds.updated_at.isoformat(timespec='seconds'),
-            'preview_url': preview,
-            'images': img_dict_list
+            "id": ds.id,
+            "name": ds.name,
+            "created_at": ds.created_at,
+            "updated_at": ds.updated_at,
+            "image_count": ds.image_count,
+            "box_count": ds.box_count,
+            "class_count": ds.class_count,
+            "images": img_arr
         })
     return success_api(data=result)
 

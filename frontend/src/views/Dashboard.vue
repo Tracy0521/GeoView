@@ -59,10 +59,11 @@
         </div>
 
         <!-- 横向滚动缩略预览栏：固定纵向高度，不撑开卡片 -->
+        <!-- loading="lazy" 是浏览器原生懒加载 -->
         <div v-if="previewSamples.length" class="thumb-scroll">
           <div class="thumb-track">
             <div v-for="(s, i) in previewSamples" :key="i" class="thumb-item">
-              <img :src="fullUrl(s.url)" :alt="s.filename">
+              <img :src="fullUrl(s.url)" loading="lazy" :alt="s.filename">
             </div>
           </div>
         </div>
@@ -124,11 +125,13 @@ export default {
       ],
       samples: [],
       uploadHint: UPLOAD_HINT,
-      isDragging: false
+      isDragging: false,
+      // 新增缓存字段
+      statsCache: null,
+      cacheTimestamp: 0
     }
   },
   computed: {
-    // 计算属性：只截取前8张图片用于预览，限制渲染数量
     previewSamples() {
       return this.samples.slice(0, 8)
     }
@@ -153,12 +156,27 @@ export default {
       }
     },
     async loadDatasetInfo() {
+      const now = Date.now()
+      // 缓存有效期 5分钟 = 300000毫秒，未过期直接返回，不请求接口
+      const cacheExpire = 300000
+      if (this.statsCache && (now - this.cacheTimestamp) < cacheExpire) {
+        // 直接复用缓存数据，不再发请求
+        const d = this.statsCache
+        this.stats[0].value = String(d.dataset_count)
+        this.stats[1].value = String(d.image_count)
+        this.stats[2].value = String(d.box_count)
+        return
+      }
+
       try {
         const [statsRes, samplesRes] = await Promise.all([
           getDatasetStats(),
           getDatasetSamples()
         ])
         const d = statsRes.data.data
+        // 存入缓存
+        this.statsCache = d
+        this.cacheTimestamp = now
         this.stats[0].value = String(d.dataset_count)
         this.stats[1].value = String(d.image_count)
         this.stats[2].value = String(d.box_count)
