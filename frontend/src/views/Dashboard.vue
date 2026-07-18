@@ -46,22 +46,22 @@
         </div>
 
         <div
-          class="upload-drop"
-          :class="{ dragging: isDragging }"
-          @dragover.prevent="isDragging = true"
-          @dragleave.prevent="isDragging = false"
-          @drop.prevent="onDrop"
-          @click="goDatasetManage"
+            class="upload-drop"
+            :class="{ dragging: isDragging }"
+            @dragover.prevent="isDragging = true"
+            @dragleave.prevent="isDragging = false"
+            @drop.prevent="onDrop"
+            @click="goDatasetManage"
         >
           <span class="cloud">☁</span>
           <p>投放遥感影像、YOLO 标注数据集压缩包</p>
           <small>{{ uploadHint }}</small>
         </div>
 
-        <!-- 横向滚动缩略预览栏 -->
-        <div v-if="samples.length" class="thumb-scroll">
+        <!-- 横向滚动缩略预览栏：固定纵向高度，不撑开卡片 -->
+        <div v-if="previewSamples.length" class="thumb-scroll">
           <div class="thumb-track">
-            <div v-for="(s, i) in samples" :key="i" class="thumb-item">
+            <div v-for="(s, i) in previewSamples" :key="i" class="thumb-item">
               <img :src="fullUrl(s.url)" :alt="s.filename">
             </div>
           </div>
@@ -127,6 +127,12 @@ export default {
       isDragging: false
     }
   },
+  computed: {
+    // 计算属性：只截取前8张图片用于预览，限制渲染数量
+    previewSamples() {
+      return this.samples.slice(0, 8)
+    }
+  },
   mounted() {
     this.loadDatasetInfo()
   },
@@ -187,7 +193,14 @@ h1 { margin: 8px 0 10px; font-size: 34px; letter-spacing: -1px; }
 
 /* 双卡片布局 */
 .dual-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-.dual-card { border-radius: 16px; padding: 22px 24px 18px; min-height: 320px; display: flex; flex-direction: column; }
+/* 核心修改：固定卡片高度，不再自适应撑开 */
+.dual-card {
+  border-radius: 16px;
+  padding: 22px 24px 18px;
+  height: 320px; /* 固定高度，两张卡片完全等高 */
+  display: flex;
+  flex-direction: column;
+}
 .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .card-title { display: flex; align-items: center; gap: 10px; }
 .card-title h3 { margin: 0; font-size: 19px; }
@@ -200,14 +213,20 @@ h1 { margin: 8px 0 10px; font-size: 34px; letter-spacing: -1px; }
 .upload-drop {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 28px 16px; border: 2px dashed #b3d4fc; border-radius: 12px;
-  background: #f0f7ff; cursor: pointer; transition: .2s; flex: 1;
+  background: #f0f7ff; cursor: pointer; transition: .2s;
+  flex: 1; /* 自动填充剩余空间 */
 }
 .upload-drop.dragging, .upload-drop:hover { border-color: #409eff; background: #e8f3ff; }
 .upload-drop .cloud { font-size: 30px; color: #409eff; font-style: normal; }
 .upload-drop p { margin: 0; font-size: 14px; color: #444; text-align: center; }
 .upload-drop small { font-size: 11px; color: #9aa5b3; text-align: center; }
 
-.thumb-scroll { margin-top: 14px; overflow: hidden; }
+/* 核心修改：锁定预览区域纵向高度，仅横向滚动，不会拉高卡片 */
+.thumb-scroll {
+  margin-top: 14px;
+  overflow: hidden;
+  max-height: 70px; /* 固定纵向高度，超出隐藏 */
+}
 .thumb-track { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
 .thumb-item { flex-shrink: 0; width: 72px; height: 54px; border-radius: 6px; overflow: hidden; border: 1px solid #e0e6ed; }
 .thumb-item img { width: 100%; height: 100%; object-fit: cover; }
