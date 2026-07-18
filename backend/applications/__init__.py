@@ -32,4 +32,7 @@ def create_app(config_name=None):
     app.config['JSON_AS_ASCII'] = False
     CORS(app, supports_credentials=True)  # 设置跨域
 
+    # 导入数据集三张主表+image_info子表，让flask-migrate识别
+    from applications.models.dataset_model import Dataset, DatasetImage, DatasetAnnotation, ImageInfo
+
     return app
