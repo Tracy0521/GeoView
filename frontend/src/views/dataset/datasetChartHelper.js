@@ -11,6 +11,11 @@ export function getClassBarOption(classList = []) {
     const xData = classList.map(item => item.name)
     const yData = classList.map(item => item.annotation_count)
     const total = yData.reduce((sum, val) => sum + val, 0)
+    // 根据class_id生成和页面圆点完全一致的颜色
+    const colorList = classList.map(item => {
+        const hue = (item.class_id * 47) % 360
+        return `hsl(${hue}, 70%, 55%)`
+    })
 
     return {
         tooltip: {
@@ -31,7 +36,12 @@ export function getClassBarOption(classList = []) {
             {
                 type: 'bar',
                 data: yData,
-                barWidth: '50%'
+                barWidth: '50%',
+                itemStyle: {
+                    color: function (params) {
+                        return colorList[params.dataIndex]
+                    }
+                }
             }
         ]
     }
@@ -68,9 +78,13 @@ export function getSplitPieOption(trainCount = 0, valCount = 0) {
 
 /**
  * 3. Charts页面：Top N类别环形饼图 Top Classes
- * @param {Array} topClassList [{name, annotation_count}]
+ * @param {Array} topClassList [{name, annotation_count, class_id}]
  */
 export function getTopClassPieOption(topClassList = []) {
+    const colorList = topClassList.map(item => {
+        const hue = (item.class_id * 47) % 360
+        return `hsl(${hue}, 70%, 55%)`
+    })
     return {
         tooltip: {
             trigger: 'item',
@@ -81,7 +95,12 @@ export function getTopClassPieOption(topClassList = []) {
                 type: 'pie',
                 radius: ['42%', '72%'],
                 data: topClassList,
-                label: { show: false }
+                label: { show: false },
+                itemStyle: {
+                    color: function (params) {
+                        return colorList[params.dataIndex]
+                    }
+                }
             }
         ]
     }

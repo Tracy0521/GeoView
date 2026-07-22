@@ -25,6 +25,9 @@ from applications.common.utils.http import fail_api, success_api
 from applications.extensions import db
 from applications.models.dataset_model import Dataset, DatasetImage, DatasetAnnotation, ImageInfo
 
+import yaml
+from applications.models.dataset_model import DatasetClass
+
 dataset_api = Blueprint('dataset_api', __name__, url_prefix='/api/dataset')
 dataset_static = Blueprint(
     'dataset_static', __name__, url_prefix='/_uploads/dataset_library')
@@ -74,6 +77,78 @@ def _category_group(class_id):
     if class_id == LAUNCHER_CLASS_ID:
         return 'launcher'
     return 'unknown'
+
+
+def _find_dataset_yaml(root_dir: str):
+    """递归查找dataset.yaml"""
+    for parent, _, files in os.walk(root_dir):
+        if "dataset.yaml" in files:
+            return os.path.join(parent, "dataset.yaml")
+    return None
+
+
+def _parse_dataset_yaml(yaml_path: str):
+    """解析dataset.yaml，返回类别列表 [{"class_id":int,"name":str}]"""
+    try:
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except Exception as e:
+        raise Exception(f"读取yaml失败:{str(e)}")
+    if not isinstance(data, dict):
+        raise Exception("yaml格式非法")
+    nc = data.get("nc")
+    name_map = data.get("names")
+    if nc is None or not name_map:
+        raise Exception("yaml缺少nc或names字段")
+    if len(name_map) != nc:
+        raise Exception(f"nc({nc})与类别数量{len(name_map)}不匹配")
+    class_list = []
+    for cid_str, cname in name_map.items():
+        try:
+            cid = int(cid_str)
+        except ValueError:
+            raise Exception(f"类别ID {cid_str} 不是数字")
+        class_list.append({"class_id": cid, "name": cname})
+    return class_list
+
+
+def _import_dataset_classes(dataset_id: str, class_list: list, warnings_log: list):
+    """批量导入类别，重复自动跳过，同名更新"""
+    try:
+        for item in class_list:
+            cid = item["class_id"]
+            cname = item["name"]
+            exist = DatasetClass.query.filter_by(dataset_id=dataset_id, class_id=cid).first()
+            if exist:
+                if exist.name != cname:
+                    exist.name = cname
+                continue
+            new_cls = DatasetClass(
+                dataset_id=dataset_id,
+                class_id=cid,
+                name=cname,
+                annotation_count=0
+            )
+            db.session.add(new_cls)
+        db.session.commit()
+        warnings_log.append(f"✅ 成功导入{len(class_list)}个类别")
+    except Exception as e:
+        db.session.rollback()
+        warnings_log.append(f"类别导入失败:{str(e)}")
+
+
+def refresh_class_annotation_count(dataset_id):
+    """统计每个类别标注数量，更新DatasetClass.annotation_count"""
+    from sqlalchemy import func
+    data = db.session.query(
+        DatasetAnnotation.class_id,
+        func.count(DatasetAnnotation.id).label("cnt")
+    ).join(DatasetImage).filter(DatasetImage.dataset_id == dataset_id).group_by(DatasetAnnotation.class_id).all()
+    for cid, cnt in data:
+        row = DatasetClass.query.filter_by(dataset_id=dataset_id, class_id=cid).first()
+        if row:
+            row.annotation_count = cnt
+    db.session.commit()
 
 
 def _parse_yolo_label(content):
@@ -182,10 +257,21 @@ def _build_image_dict(img_model: DatasetImage):
     """数据库模型 → 前端JSON结构，携带image_info影像元信息"""
     ann_models = DatasetAnnotation.query.filter_by(image_id=img_model.id).all()
     ann_list = []
+
+    # =====新增：一次性加载当前数据集全部类别映射 class_id -> name=====
+    from applications.models.dataset_model import DatasetClass
+    class_map = {}
+    cls_rows = DatasetClass.query.filter_by(dataset_id=img_model.dataset_id).all()
+    for row in cls_rows:
+        class_map[row.class_id] = row.name
+    # =====================================================
+
     for ann in ann_models:
+        real_name = class_map.get(ann.class_id, f"class_{ann.class_id}")
         ann_list.append({
             "class_id": ann.class_id,
             "category": ann.category,
+            "class_name": real_name,   # <---新增字段，真实类别名：A16_FA-18
             "x": ann.x,
             "y": ann.y,
             "w": ann.w,
@@ -423,6 +509,17 @@ def _extract_zip_to_dataset(dataset_id, zip_path, warnings_log):
 
     try:
         _extract_zip_archive(zip_path, temp_dir)
+        # 自动识别 dataset.yaml 导入类别
+        yaml_path = _find_dataset_yaml(temp_dir)
+        if yaml_path:
+            try:
+                cls_list = _parse_dataset_yaml(yaml_path)
+                _import_dataset_classes(dataset_id, cls_list, warnings_log)
+            except Exception as e:
+                warnings_log.append(f"解析dataset.yaml异常:{str(e)}")
+        else:
+            warnings_log.append("压缩包未找到dataset.yaml，类别需要手动添加")
+
         image_files = {}
         label_files = {}
 
@@ -509,7 +606,7 @@ def global_stats():
     # 更新缓存
     _stats_cache = res_data
     _stats_expire = now + timedelta(minutes=5)
-    return success_api(data=res_data)
+    return success_api(data=_stats_cache)
 
 
 from sqlalchemy.orm import joinedload
@@ -732,6 +829,8 @@ def dataset_upload(dataset_id):
         else:
             warnings_log.append(f'不支持的文件类型: {upload.filename}')
     _sync_dataset_stat(ds)
+    # 上传完成刷新各类别标注数量
+    refresh_class_annotation_count(dataset_id)
     has_errors = any('超出范围' in w or '越界' in w or '格式错误' in w for w in warnings_log)
     return success_api(
         msg='上传完成' if not has_errors else '上传完成，但存在标注校验问题',
@@ -768,6 +867,8 @@ def dataset_split(dataset_id):
     for idx, img in enumerate(img_models):
         img.split = "train" if idx < split_idx else "val"
     db.session.commit()
+    # 划分完成同步类别数量统计
+    refresh_class_annotation_count(dataset_id)
     train_count = sum(1 for x in img_models if x.split == "train")
     val_count = len(img_models) - train_count
     return success_api(
@@ -838,7 +939,16 @@ def dataset_export(dataset_id):
     if not img_models:
         return fail_api('数据集为空，无法导出')
     buffer = io.BytesIO()
-    class_names = [f'class_{i}' for i in range(NUM_CLASSES)]
+    # 从数据库读取真实类别名称
+    cls_rows = DatasetClass.query.filter_by(dataset_id=dataset_id).order_by(DatasetClass.class_id).all()
+    class_names = [""] * NUM_CLASSES
+    for row in cls_rows:
+        class_names[row.class_id] = row.name
+    # 缺失类别填充默认名称
+    for idx in range(NUM_CLASSES):
+        if not class_names[idx]:
+            class_names[idx] = f"class_{idx}"
+
     yaml_content = (
         f'path: .\n'
         f'train: images\n'
@@ -876,3 +986,46 @@ def dataset_export(dataset_id):
         as_attachment=True,
         download_name=f'{safe_name}_yolo.zip'
     )
+
+
+# ============ 新增类别相关接口 ============
+@dataset_api.get("/<dataset_id>/classes")
+def get_dataset_classes(dataset_id):
+    ds = Dataset.query.get(dataset_id)
+    if not ds:
+        return fail_api("数据集不存在")
+    rows = DatasetClass.query.filter_by(dataset_id=dataset_id).order_by(DatasetClass.class_id).all()
+    res = []
+    for r in rows:
+        res.append({
+            "class_id": r.class_id,
+            "name": r.name,
+            "annotation_count": r.annotation_count
+        })
+    return success_api(data=res)
+
+
+@dataset_api.post("/<dataset_id>/classes")
+def add_single_class(dataset_id):
+    data = request.get_json(silent=True) or {}
+    class_id = data.get("class_id")
+    name = str(data.get("name", "")).strip()
+    if class_id is None or not isinstance(class_id, int):
+        return fail_api("class_id必须为数字")
+    if not name:
+        return fail_api("类别名称不能为空")
+    ds = Dataset.query.get(dataset_id)
+    if not ds:
+        return fail_api("数据集不存在")
+    exist = DatasetClass.query.filter_by(dataset_id=dataset_id, class_id=class_id).first()
+    if exist:
+        return fail_api(f"类别ID {class_id} 已存在")
+    new_cls = DatasetClass(
+        dataset_id=dataset_id,
+        class_id=class_id,
+        name=name,
+        annotation_count=0
+    )
+    db.session.add(new_cls)
+    db.session.commit()
+    return success_api(msg="类别添加成功")

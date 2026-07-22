@@ -190,61 +190,100 @@
       </div>
     </div>
 
-    <!-- ========== Classes 标签页（预留，后续开发） ========== -->
+    <!-- ========== Classes 标签页【改造完成】 ========== -->
     <div v-if="activeTab === 'classes'" class="tab-content">
       <div class="chart-card">
-        <h3>Class Distribution</h3>
-        <div class="chart-box">类别分布柱状图区域（对接接口后渲染echarts）</div>
+        <div class="chart-header-row">
+          <h3>Class Distribution</h3>
+          <span class="chart-subtitle">{{ classList.length }} classes · {{ totalAnnotationCount }} total annotations</span>
+        </div>
+        <div class="chart-box" ref="classChartWrap"></div>
       </div>
 
       <div class="class-table-wrap">
         <div class="table-head-row">
-          <h3>类别列表</h3>
-          <div class="add-class-row">
-            <el-input v-model="newClassName" placeholder="输入类别名称" />
-            <button class="dark-btn small" @click="addClass">新增类别</button>
-          </div>
+          <h3>Classes</h3>
         </div>
         <table class="class-table">
           <thead>
           <tr>
-            <th>ID</th>
-            <th>类别名称</th>
-            <th>标注数量</th>
+            <th style="width:110px">
+              <span>Index</span>
+              <button class="sort-btn" @click="sortByField('class_id')">
+                {{ sortField === 'class_id' ? (sortAsc ? '↑' : '↓') : '⇅' }}
+              </button>
+            </th>
+            <th>
+              <span>Name</span>
+              <button class="sort-btn" @click="sortByField('name')">
+                {{ sortField === 'name' ? (sortAsc ? '↑' : '↓') : '⇅' }}
+              </button>
+            </th>
+            <th style="width:160px">
+              <span>Annotations</span>
+              <button class="sort-btn" @click="sortByField('annotation_count')">
+                {{ sortField === 'annotation_count' ? (sortAsc ? '↑' : '↓') : '⇅' }}
+              </button>
+            </th>
+            <th style="width:140px">Images</th>
           </tr>
           </thead>
           <tbody>
-          <tr>
-            <td colspan="3" class="empty-row">等待后端接口返回类别数据</td>
+          <tr v-if="classList.length === 0">
+            <td colspan="4" class="empty-row">等待后端接口返回类别数据</td>
+          </tr>
+          <tr v-for="c in sortedClassList" :key="c.class_id">
+            <td>
+              <span class="color-dot" :style="{background:getClassColor(c.class_id)}"></span>
+              {{ c.class_id }}
+            </td>
+            <td>{{ c.name }}</td>
+            <td>{{ c.annotation_count }}</td>
+            <td>{{ c.image_count || 0 }}</td>
           </tr>
           </tbody>
+          <!-- 新增类别固定放在表格底部 -->
+          <tfoot>
+          <tr>
+            <td colspan="4" class="add-class-footer-row">
+              <span class="color-dot" style="background:#888;"></span>
+              <el-input
+                  v-model="newClassName"
+                  placeholder="Add new class..."
+                  class="add-class-input"
+                  @keyup.enter="addClass"
+              />
+              <button class="dark-btn small" @click="addClass">+ Add</button>
+            </td>
+          </tr>
+          </tfoot>
         </table>
       </div>
     </div>
 
-    <!-- ========== Charts 标签页（预留，后续开发） ========== -->
+    <!-- ========== Charts 标签页 ========== -->
     <div v-if="activeTab === 'charts'" class="tab-content">
       <div class="chart-grid">
         <div class="chart-card">
           <h3>划分分布 Train / Val</h3>
-          <div class="chart-box">划分饼图</div>
+          <div class="chart-box" ref="splitChartWrap">划分饼图</div>
         </div>
         <div class="chart-card">
           <h3>Top Classes</h3>
-          <div class="chart-box">Top类别饼图</div>
+          <div class="chart-box" ref="topClassChartWrap">Top类别饼图</div>
         </div>
         <div class="chart-card">
           <h3>图片尺寸分布</h3>
-          <div class="chart-box">宽高分布图</div>
+          <div class="chart-box" ref="sizeChartWrap">宽高分布图</div>
         </div>
         <div class="chart-card">
           <h3>单图标注数量分布</h3>
-          <div class="chart-box">单图标注柱状图</div>
+          <div class="chart-box" ref="objPerImgChartWrap">单图标注柱状图</div>
         </div>
       </div>
     </div>
 
-    <!-- 大图查看弹窗 -->
+    <!-- 大图查看弹窗【标注明细展示真实类别名称】 -->
     <div v-if="selectedImage" class="image-modal" @click.self="closeViewer">
       <div class="modal-inner">
         <div class="modal-header">
@@ -267,6 +306,7 @@
           >
             <i :style="{ background: getBoxColor(ann.class_id) }" />
             <span>类别 #{{ ann.class_id }}</span>
+            <span>{{ classNameMap[ann.class_id] || '未知类别' }}</span>
             <span>{{ categoryLabel(ann.class_id) }}</span>
             <span>x={{ ann.x.toFixed(4) }} y={{ ann.y.toFixed(4) }}</span>
             <span>w={{ ann.w.toFixed(4) }} h={{ ann.h.toFixed(4) }}</span>
@@ -294,6 +334,7 @@ import { getDataset, exportDatasetUrl } from '@/api/dataset'
 import { drawAnnotations } from '@/utils/annotationDrawer'
 import { CATEGORY_GROUPS, getBoxColor, getCategoryGroup } from '@/utils/datasetConstants'
 import global from '@/global'
+import axios from 'axios'
 
 export default {
   name: 'DatasetDetail',
@@ -332,16 +373,51 @@ export default {
       loading: false,
       _pageData: [],
 
-      // Classes页面临时变量
-      newClassName: ''
+      // Classes页面
+      newClassName: '',
+      classList: [],
+      totalAnnotationCount: 0,
+
+      // 类别名称映射（弹窗使用）
+      classNameMap: {},
+      // 类别颜色缓存
+      classColorMap: {},
+      // 排序配置
+      sortField: 'annotation_count',
+      sortAsc: false,
+
+      // 图表相关变量
+      datasetStats: {},
+      charts: {
+        classBar: null,
+        splitPie: null,
+        topClassPie: null,
+        imageSizeBar: null,
+        objPerImgBar: null
+      }
     }
   },
   computed: {
-    // 前端搜索过滤当前页数据
     pageImages() {
       const key = this.keyword.trim().toLowerCase()
       if (!key) return this._pageData
       return this._pageData.filter(img => img.filename.toLowerCase().includes(key))
+    },
+    sortedClassList() {
+      const arr = [...this.classList]
+      arr.sort((a, b) => {
+        let valA = a[this.sortField]
+        let valB = b[this.sortField]
+        if (typeof valA === 'string') {
+          valA = valA.toLowerCase()
+          valB = valB.toLowerCase()
+          if (valA > valB) return this.sortAsc ? 1 : -1
+          if (valA < valB) return this.sortAsc ? -1 : 1
+          return 0
+        }
+        return this.sortAsc ? valA - valB : valB - valA
+      })
+      return arr
     }
   },
   watch: {
@@ -352,11 +428,20 @@ export default {
         this.loadDatasetBase()
       }
     },
-    activeTab() {
-      // 切换标签自动关闭大图弹窗
+    activeTab(newTab) {
       this.selectedImage = null
+      this.destroyAllCharts()
+      if (newTab === 'classes') {
+        this.loadClassData().then(() => {
+          setTimeout(() => {
+            this.renderClassDistributionChart()
+          }, 120)
+        })
+      }
+      if (newTab === 'charts') {
+        this.$nextTick(() => this.renderAllCharts())
+      }
     },
-    // 切换显隐选项，重绘所有缩略图
     showAnnotations() {
       this.$nextTick(() => this.redrawAllThumb())
     },
@@ -375,6 +460,7 @@ export default {
   },
   beforeUnmount() {
     document.removeEventListener('click', this.handleDocumentClick)
+    this.destroyAllCharts()
   },
   methods: {
     getBoxColor,
@@ -402,19 +488,53 @@ export default {
       }
     },
     onSearchChange() {
-      // 搜索重置回第一页
       this.currentPage = 1
       this.loadImagePage()
     },
 
-    // 保存数据集名称、简介（后续对接接口实现）
+    // 获取类别固定颜色
+    getClassColor(classId) {
+      if (this.classColorMap[classId]) {
+        return this.classColorMap[classId]
+      }
+      const hue = (classId * 47) % 360
+      const color = `hsl(${hue}, 70%, 55%)`
+      this.classColorMap[classId] = color
+      return color
+    },
+
+    // 切换排序字段
+    sortByField(field) {
+      if (this.sortField === field) {
+        this.sortAsc = !this.sortAsc
+      } else {
+        this.sortField = field
+        this.sortAsc = true
+      }
+    },
+
+    // 加载类别名称映射（弹窗使用）
+    async loadDatasetClassMap(datasetId) {
+      try {
+        const url = `${global.BASEURL}/api/dataset/${datasetId}/classes`
+        const res = await axios.get(url)
+        const map = {}
+        res.data.data.forEach(item => {
+          map[item.class_id] = item.name
+        })
+        this.classNameMap = map
+      } catch (err) {
+        console.warn("加载类别名称映射失败", err)
+        this.classNameMap = {}
+      }
+    },
+
+    // 保存数据集名称、简介
     async saveDatasetInfo() {
       console.log('保存数据集信息', this.dataset.name, this.dataset.description)
-      // 此处调用后端接口 updateDatasetInfo
       this.editName = false
     },
 
-    // 重置分页状态（切换数据集时调用）
     resetPage() {
       this.currentPage = 1
       this.total = 0
@@ -422,23 +542,26 @@ export default {
       this.jumpPageNum = 1
       this.selectedImage = null
       this._pageData = []
+      this.classNameMap = {}
+      this.classColorMap = {}
+      this.classList = []
+      this.totalAnnotationCount = 0
     },
 
-    // 只加载数据集基础信息，不带图片
+    // 只加载数据集基础信息
     async loadDatasetBase() {
       try {
         const res = await getDataset(this.$route.params.id, { page: 0, limit: 0 })
         const { images, ...baseInfo } = res.data.data
         this.dataset = baseInfo
-        // 兼容后端没有description字段
         if (!this.dataset.description) this.dataset.description = ''
+        await this.loadDatasetClassMap(this.dataset.id)
         await this.loadImagePage()
       } catch {
         this.$router.replace('/dataset-management')
       }
     },
 
-    // 加载指定页码数据
     async loadImagePage() {
       if (this.loading) return
       this.loading = true
@@ -459,7 +582,6 @@ export default {
       }
     },
 
-    // 切换页码
     changePage(page) {
       if (page < 1 || page > this.maxPage || page === this.currentPage) return
       this.selectedImage = null
@@ -467,7 +589,6 @@ export default {
       this.loadImagePage()
     },
 
-    // 输入页码跳转
     handleJumpPage() {
       let num = Number(this.jumpPageNum)
       if (isNaN(num)) num = this.currentPage
@@ -527,16 +648,102 @@ export default {
       })
     },
 
-    // 新增类别占位方法
     addClass() {
       if (!this.newClassName.trim()) return
       console.log('新增类别：', this.newClassName)
-      // 后端新增类别接口
+      // 此处后续对接后端新增class接口
       this.newClassName = ''
     },
 
     doExport() {
       window.open(exportDatasetUrl(this.dataset.id), '_blank')
+    },
+
+    async loadClassData() {
+      try {
+        const url = `${global.BASEURL}/api/dataset/${this.dataset.id}/classes`
+        const res = await axios.get(url)
+        this.classList = res.data.data || []
+        this.totalAnnotationCount = this.classList.reduce((sum, item) => sum + item.annotation_count, 0)
+      } catch (e) {
+        console.error('加载类别列表失败', e)
+        this.classList = []
+        this.totalAnnotationCount = 0
+      }
+    },
+
+    renderClassDistributionChart() {
+      const dom = this.$refs.classChartWrap
+      if (!dom || !this.classList.length) {
+        return
+      }
+      disposeChart(this.charts.classBar)
+      const chartIns = echarts.init(dom)
+      const option = getClassBarOption(this.classList)
+      chartIns.setOption(option)
+      this.charts.classBar = chartIns
+      chartIns.resize()
+    },
+
+    renderAllCharts() {
+      this.renderSplitPieChart()
+      this.renderTopClassPieChart()
+      this.renderObjPerImageChart()
+      this.renderImageSizeChart()
+    },
+
+    renderSplitPieChart() {
+      const dom = this.$refs.splitChartWrap
+      if (!dom) return
+      disposeChart(this.charts.splitPie)
+      const chartIns = echarts.init(dom)
+      const { train_count = 0, val_count = 0 } = this.datasetStats
+      const option = getSplitPieOption(train_count, val_count)
+      chartIns.setOption(option)
+      this.charts.splitPie = chartIns
+    },
+
+    renderTopClassPieChart() {
+      const dom = this.$refs.topClassChartWrap
+      if (!dom) return
+      disposeChart(this.charts.topClassPie)
+      const chartIns = echarts.init(dom)
+      const topList = this.classList.slice(0, 8)
+      const formatData = topList.map(item => ({
+        name: item.name,
+        value: item.annotation_count
+      }))
+      const option = getTopClassPieOption(formatData)
+      chartIns.setOption(option)
+      this.charts.topClassPie = chartIns
+    },
+
+    renderObjPerImageChart() {
+      const dom = this.$refs.objPerImgChartWrap
+      if (!dom) return
+      disposeChart(this.charts.objPerImgBar)
+      const chartIns = echarts.init(dom)
+      const { object_count_list = [] } = this.datasetStats
+      const option = getObjPerImageBarOption(object_count_list)
+      chartIns.setOption(option)
+      this.charts.objPerImgBar = chartIns
+    },
+
+    renderImageSizeChart() {
+      const dom = this.$refs.sizeChartWrap
+      if (!dom) return
+      disposeChart(this.charts.imageSizeBar)
+      const chartIns = echarts.init(dom)
+      const { width_list = [], height_list = [] } = this.datasetStats
+      const option = getImageSizeBarOption(width_list, height_list)
+      chartIns.setOption(option)
+      this.charts.imageSizeBar = chartIns
+    },
+
+    destroyAllCharts() {
+      Object.values(this.charts).forEach(ins => {
+        disposeChart(ins)
+      })
     }
   }
 }
@@ -850,6 +1057,16 @@ export default {
 }
 
 /* Classes / Charts 页面样式 */
+.chart-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 12px;
+}
+.chart-subtitle {
+  color:#777;
+  font-size:13px;
+}
 .chart-card {
   background: #fff;
   border-radius: 12px;
@@ -877,10 +1094,6 @@ export default {
   align-items: center;
   margin-bottom: 12px;
 }
-.add-class-row {
-  display: flex;
-  gap: 8px;
-}
 .class-table {
   width: 100%;
   border-collapse: collapse;
@@ -889,6 +1102,35 @@ export default {
   padding: 10px;
   text-align: left;
   border-bottom: 1px solid #eee;
+}
+.sort-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size:14px;
+  color:#666;
+  padding: 0 4px;
+}
+.color-dot {
+  display: inline-block;
+  width:12px;
+  height:12px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.class-table tfoot tr {
+  border-top:1px solid #eee;
+}
+.add-class-footer-row {
+  padding:12px 10px;
+  display: flex;
+  align-items: center;
+  gap:10px;
+}
+.add-class-input {
+  flex:1;
+  max-width: 420px;
 }
 .empty-row {
   text-align: center;

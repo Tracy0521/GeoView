@@ -67,3 +67,18 @@ class ImageInfo(db.Model):
     extra_meta = db.Column(db.Text, comment="其他扩展元信息(json)")
 
     image = db.relationship("DatasetImage", back_populates="image_info")
+
+
+# ===================== 【新增 数据集类别表】=====================
+class DatasetClass(db.Model):
+    __tablename__ = "dataset_class"
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    dataset_id = db.Column(db.String(32), db.ForeignKey("dataset.id"), nullable=False, index=True, comment="所属数据集ID")
+    class_id = db.Column(db.Integer, nullable=False, comment="YOLO类别编号 0,1,2...")
+    name = db.Column(db.String(64), nullable=False, comment="类别名称，从dataset.yaml读取")
+    annotation_count = db.Column(db.Integer, default=0, comment="该类别总标注框数量")
+
+    # 联合唯一约束：同一个数据集不能存在相同class_id
+    __table_args__ = (
+        db.UniqueConstraint("dataset_id", "class_id", name="uix_dataset_class_id"),
+    )

@@ -7,9 +7,16 @@ from flask_migrate import Migrate
 from applications import create_app
 from applications.common.utils.http import fail_api
 from applications.extensions import db
+# ============新增导入============
+from applications.models.dataset_model import DatasetClass
 
 debug_mode = False
 app = create_app()
+
+# ============新增：启动自动创建dataset_class表============
+with app.app_context():
+    # checkfirst=True 表存在则跳过，不存在自动创建，安全无冲突
+    DatasetClass.__table__.create(bind=db.engine, checkfirst=True)
 
 
 @app.before_request
