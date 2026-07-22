@@ -5,6 +5,7 @@ import os
 import shutil
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from flask import Blueprint, current_app, request
@@ -13,6 +14,10 @@ from werkzeug.utils import secure_filename
 from applications.common.utils.http import fail_api, success_api
 from applications.extensions import db
 from applications.models.model_rank import ModelProject, ModelRecord
+from applications.services.remote_models import (
+    configured_servers, download_candidate, get_server, public_server, scan_server,
+    validated_model_path
+)
 
 model_rank_api = Blueprint('model_rank_api', __name__, url_prefix='/api/model-rank')
 _lock = threading.Lock()
@@ -74,7 +79,12 @@ def _write_projects(projects):
                     size=int(model.get('size') or 0), framework=model.get('framework', 'PyTorch'),
                     score=str(model.get('score', '')), training_date=model.get('training_date', ''),
                     training_epochs=int(epochs) if str(epochs or '').isdigit() else None,
-                    metrics=model.get('metrics') or {}, created_at=_parse_datetime(model.get('created_at'))
+                    metrics=model.get('metrics') or {},
+                    source_type=model.get('source_type', 'local'),
+                    source_server=model.get('source_server', ''),
+                    remote_path=model.get('remote_path', ''),
+                    sync_status=model.get('sync_status', 'synced'),
+                    created_at=_parse_datetime(model.get('created_at'))
                 )
                 db.session.add(record)
                 # Large metric JSON documents must be inserted separately. Without an
@@ -116,7 +126,9 @@ def _read_projects():
                 'training_date': model.training_date or '',
                 'training_epochs': str(model.training_epochs) if model.training_epochs else '',
                 'created_at': model.created_at.isoformat(timespec='seconds'),
-                'metrics': model.metrics or {}
+                'metrics': model.metrics or {}, 'source_type': model.source_type or 'local',
+                'source_server': model.source_server or '', 'remote_path': model.remote_path or '',
+                'sync_status': model.sync_status or 'synced'
             } for model in project.model_records]
         })
     return projects
@@ -428,8 +440,121 @@ def model_upload(project_id):
         'size': os.path.getsize(path),
         'framework': request.form.get('framework', 'PyTorch'),
         'score': request.form.get('score', ''),
+        'source_type': 'local',
+        'source_server': '',
+        'remote_path': '',
+        'sync_status': 'synced',
         'created_at': now,
         'metrics': metrics
+    }
+    with _lock:
+        projects = _read_projects()
+        project = _find_project(projects, project_id)
+        if not project:
+            os.remove(path)
+            return fail_api('项目不存在')
+        if any(item.get('source_type') == 'remote' and
+               str(item.get('source_server')) == server['name'] and
+               item.get('remote_path') == remote_path for item in project['models']):
+            os.remove(path)
+            return fail_api('该远程模型已同步到当前项目')
+        project['models'].append(model)
+        project['updated_at'] = now
+        _write_projects(projects)
+    return success_api(msg='模型添加成功', data=model)
+
+
+@model_rank_api.get('/projects/<string:project_id>/remote-models')
+def remote_model_list(project_id):
+    project = _find_project(_read_projects(), project_id)
+    if not project:
+        return fail_api('项目不存在')
+    synced = {
+        (str(model.get('source_server', '')), model.get('remote_path', ''))
+        for model in project['models'] if model.get('source_type') == 'remote'
+    }
+    configured = configured_servers()
+
+    def inspect_server(server):
+        server_data = public_server(server)
+        try:
+            candidates = scan_server(server)
+            server_data.update({'status': 'online', 'message': '', 'model_count': len(candidates)})
+            return server, server_data, candidates, ''
+        except Exception as error:
+            server_data.update({'status': 'offline', 'message': '连接失败或实例未启动', 'model_count': 0})
+            return server, server_data, [], str(error)
+
+    servers = []
+    models = []
+    with ThreadPoolExecutor(max_workers=min(4, max(1, len(configured)))) as executor:
+        scanned = list(executor.map(inspect_server, configured))
+    for server, server_data, candidates, error in scanned:
+        if error:
+            current_app.logger.warning('Remote model scan failed for %s: %s', server['name'], error)
+        for candidate in candidates:
+            candidate['sync_status'] = 'synced' if (server['name'], candidate['remote_path']) in synced else 'remote'
+            models.append(candidate)
+        servers.append(server_data)
+    return success_api(data={'servers': servers, 'models': models})
+
+
+@model_rank_api.post('/projects/<string:project_id>/remote-models/import')
+def remote_model_import(project_id):
+    data = request.get_json(silent=True) or {}
+    server = get_server(data.get('server_id'))
+    if not server:
+        return fail_api('远程服务器不存在或未配置')
+    remote_path = validated_model_path(server, data.get('remote_path'))
+    if not remote_path:
+        return fail_api('仅允许同步 output/*/weights/best.pt')
+    projects = _read_projects()
+    project = _find_project(projects, project_id)
+    if not project:
+        return fail_api('项目不存在')
+    if any(model.get('source_type') == 'remote' and
+           str(model.get('source_server')) == server['name'] and
+           model.get('remote_path') == remote_path for model in project['models']):
+        return fail_api('该远程模型已同步到当前项目')
+
+    default_name = os.path.basename(os.path.dirname(os.path.dirname(remote_path)))
+    model_name = str(data.get('name', '')).strip() or default_name
+    if len(model_name) > 80:
+        return fail_api('模型名称不能超过80个字符')
+    model_id = uuid.uuid4().hex[:12]
+    directory = os.path.join(_root(), project_id)
+    os.makedirs(directory, exist_ok=True)
+    filename = '{}_{}.pt'.format(model_id, secure_filename(model_name) or 'model')
+    path = os.path.join(directory, filename)
+    temporary_path = path + '.part'
+    try:
+        downloaded = download_candidate(server, remote_path, temporary_path)
+        os.replace(temporary_path, path)
+        metrics = {}
+        if downloaded['results']:
+            metrics = _metrics_from_csv(io.BytesIO(downloaded['results']))
+    except (ValueError, UnicodeError) as error:
+        if os.path.exists(temporary_path):
+            os.remove(temporary_path)
+        if os.path.exists(path):
+            os.remove(path)
+        return fail_api('远程模型同步失败：{}'.format(str(error)))
+    except Exception as error:
+        current_app.logger.warning('Remote model download failed from %s: %s', server['name'], error)
+        if os.path.exists(temporary_path):
+            os.remove(temporary_path)
+        if os.path.exists(path):
+            os.remove(path)
+        return fail_api('远程模型同步失败，请确认实例在线且文件可读')
+
+    now = datetime.now().isoformat(timespec='seconds')
+    model = {
+        'id': model_id, 'name': model_name, 'filename': 'best.pt',
+        'stored_filename': filename, 'size': os.path.getsize(path),
+        'framework': str(data.get('framework', 'PyTorch')).strip()[:40] or 'PyTorch',
+        'score': str(data.get('score', '')).strip()[:30], 'created_at': now,
+        'metrics': metrics, 'source_type': 'remote', 'source_server': server['name'],
+        'remote_path': remote_path, 'sync_status': 'synced'
     }
     with _lock:
         projects = _read_projects()
@@ -440,7 +565,7 @@ def model_upload(project_id):
         project['models'].append(model)
         project['updated_at'] = now
         _write_projects(projects)
-    return success_api(msg='模型添加成功', data=model)
+    return success_api(msg='远程模型同步成功', data=model)
 
 
 @model_rank_api.patch('/projects/<string:project_id>/models/<string:model_id>')

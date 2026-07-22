@@ -29,4 +29,8 @@ class ModelRecord(db.Model):
     training_date = db.Column(db.String(20), default='')
     training_epochs = db.Column(db.Integer, nullable=True)
     metrics = db.Column(db.JSON, default=dict)
+    source_type = db.Column(db.String(20), default='local')
+    source_server = db.Column(db.String(80), default='')
+    remote_path = db.Column(db.String(500), default='')
+    sync_status = db.Column(db.String(20), default='synced')
     created_at = db.Column(db.DateTime, default=datetime.datetime.now, nullable=False)
