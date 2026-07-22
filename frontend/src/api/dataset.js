@@ -6,19 +6,24 @@ import { requestfile } from './requestfile'
 import global from '@/global'
 
 export const getDatasetStats = () =>
-  request({ url: '/api/dataset/stats', method: 'get' })
+    request({ url: '/api/dataset/stats', method: 'get' })
 
 export const getDatasetSamples = () =>
-  request({ url: '/api/dataset/samples', method: 'get' })
+    request({ url: '/api/dataset/samples', method: 'get' })
 
 export const getDatasets = () =>
-  request({ url: '/api/dataset/list', method: 'get' })
+    request({ url: '/api/dataset/list', method: 'get' })
 
-export const getDataset = id =>
-  request({ url: `/api/dataset/${id}`, method: 'get' })
+// 支持传入 {page, limit} 分页参数
+export const getDataset = (id, params = {}) =>
+    request({
+        url: `/api/dataset/${id}`,
+        method: 'get',
+        params
+    })
 
 export const createDataset = data =>
-  request({ url: '/api/dataset/create', method: 'post', data })
+    request({ url: '/api/dataset/create', method: 'post', data })
 
 export const getRemoteDatasets = () =>
   request({ url: '/api/dataset/remote', method: 'get' })
@@ -27,33 +32,33 @@ export const importRemoteDataset = data =>
   request({ url: '/api/dataset/remote/import', method: 'post', data })
 
 export const renameDataset = (id, name) =>
-  request({ url: `/api/dataset/${id}/rename`, method: 'put', data: { name } })
+    request({ url: `/api/dataset/${id}/rename`, method: 'put', data: { name } })
 
 export const deleteDataset = id =>
-  request({ url: `/api/dataset/${id}`, method: 'delete' })
+    request({ url: `/api/dataset/${id}`, method: 'delete' })
 
 export const uploadToDataset = (id, formData, onUploadProgress) =>
-  requestfile({
-    url: `/api/dataset/${id}/upload`,
-    method: 'post',
-    data: formData,
-    onUploadProgress
-  })
+    requestfile({
+        url: `/api/dataset/${id}/upload`,
+        method: 'post',
+        data: formData,
+        onUploadProgress
+    })
 
 export const splitDataset = (id, trainRatio = 0.8) =>
-  request({
-    url: `/api/dataset/${id}/split`,
-    method: 'post',
-    data: { train_ratio: trainRatio }
-  })
+    request({
+        url: `/api/dataset/${id}/split`,
+        method: 'post',
+        data: { train_ratio: trainRatio }
+    })
 
 export const preprocessDataset = (id, data) =>
-  request({
-    url: `/api/dataset/${id}/preprocess`,
-    method: 'post',
-    data
-  })
+    request({
+        url: `/api/dataset/${id}/preprocess`,
+        method: 'post',
+        data
+    })
 
 /** 导出 YOLO 格式 ZIP（浏览器直接下载） */
 export const exportDatasetUrl = id =>
-  `${global.BASEURL}api/dataset/${id}/export`
+    `${global.BASEURL}api/dataset/${id}/export`

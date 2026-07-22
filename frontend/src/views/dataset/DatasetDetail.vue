@@ -12,17 +12,18 @@
       <button class="dark-button" @click="doExport">导出 YOLO</button>
     </header>
 
-    <div v-if="dataset.images?.length" class="workspace">
+    <div class="workspace">
       <aside class="image-panel">
         <el-input v-model="keyword" clearable placeholder="搜索文件名…" />
-        <div class="image-list">
+        <!-- 绑定滚动监听，触底加载下一页 -->
+        <div class="image-list" @scroll="onImageScroll">
           <button
-            v-for="img in filteredImages"
-            :key="img.id"
-            type="button"
-            class="image-item"
-            :class="{ active: selectedImage?.id === img.id }"
-            @click="selectImage(img)"
+              v-for="img in filteredImages"
+              :key="img.id"
+              type="button"
+              class="image-item"
+              :class="{ active: selectedImage?.id === img.id }"
+              @click="selectImage(img)"
           >
             <img :src="fullUrl(img.url)" :alt="img.filename" loading="lazy">
             <span class="item-info">
@@ -33,6 +34,8 @@
               </small>
             </span>
           </button>
+          <div v-if="loading" class="load-tip">加载中……</div>
+          <div v-if="!hasMore && imageList.length > 0" class="load-tip">已加载全部影像</div>
         </div>
       </aside>
 
@@ -50,9 +53,9 @@
         <div v-if="selectedImage.annotations?.length" class="annotation-table">
           <div class="table-head">标注明细</div>
           <div
-            v-for="(ann, idx) in selectedImage.annotations"
-            :key="idx"
-            class="ann-row"
+              v-for="(ann, idx) in selectedImage.annotations"
+              :key="idx"
+              class="ann-row"
           >
             <i :style="{ background: getBoxColor(ann.class_id) }" />
             <span>类别 #{{ ann.class_id }}</span>
@@ -67,7 +70,7 @@
       </section>
     </div>
 
-    <div v-else class="empty-state">该数据集暂无影像，请返回列表上传文件。</div>
+    <div v-if="imageList.length === 0 && !loading" class="empty-state">该数据集暂无影像，请返回列表上传文件。</div>
   </main>
 </template>
 
@@ -83,12 +86,19 @@ export default {
     return {
       dataset: null,
       keyword: '',
-      selectedImage: null
+      selectedImage: null,
+
+      // 分页控制
+      imageList: [],
+      page: 1,
+      pageSize: 16,
+      hasMore: true,
+      loading: false
     }
   },
   computed: {
     filteredImages() {
-      const images = this.dataset?.images || []
+      const images = this.imageList
       const key = this.keyword.trim().toLowerCase()
       if (!key) return images
       return images.filter(img => img.filename.toLowerCase().includes(key))
@@ -98,7 +108,8 @@ export default {
     '$route.params.id': {
       immediate: true,
       handler() {
-        this.load()
+        this.resetPagination()
+        this.loadDatasetBase()
       }
     }
   },
@@ -117,16 +128,69 @@ export default {
       const group = getCategoryGroup(classId)
       return CATEGORY_GROUPS[group]?.label || '未知'
     },
-    async load() {
+
+    // 重置分页状态（切换数据集时调用）
+    resetPagination() {
+      this.imageList = []
+      this.page = 1
+      this.hasMore = true
+      this.loading = false
+      this.selectedImage = null
+    },
+
+    // 只加载数据集基础信息，不带图片
+    async loadDatasetBase() {
       try {
-        const res = await getDataset(this.$route.params.id)
-        this.dataset = res.data.data
-        this.selectedImage = this.dataset.images?.[0] || null
-        this.$nextTick(() => this.renderSelected())
+        const res = await getDataset(this.$route.params.id, { page: 0, limit: 0 })
+        const { images, ...baseInfo } = res.data.data
+        this.dataset = baseInfo
+        await this.loadImagePage()
       } catch {
         this.$router.replace('/dataset-management')
       }
     },
+
+    // 加载图片分页
+    async loadImagePage() {
+      if (this.loading || !this.hasMore) return
+      this.loading = true
+      try {
+        const res = await getDataset(this.$route.params.id, {
+          page: this.page,
+          limit: this.pageSize
+        })
+        const data = res.data.data
+        const newImgs = data.images || []
+
+        if (this.page === 1) {
+          this.imageList = newImgs
+          if (newImgs.length > 0) {
+            this.selectedImage = newImgs[0]
+            this.$nextTick(() => this.renderSelected())
+          }
+        } else {
+          this.imageList.push(...newImgs)
+        }
+
+        const total = data.pagination?.total || 0
+        this.hasMore = this.imageList.length < total
+        this.page += 1
+      } catch (err) {
+        console.error('分页加载图片失败：', err)
+      } finally {
+        this.loading = false
+      }
+    },
+
+    // 左侧滚动到底部触发加载
+    onImageScroll(e) {
+      const dom = e.target
+      const reachBottom = dom.scrollTop + dom.clientHeight >= dom.scrollHeight - 80
+      if (reachBottom) {
+        this.loadImagePage()
+      }
+    },
+
     selectImage(img) {
       this.selectedImage = img
       this.$nextTick(() => this.renderSelected())
@@ -210,6 +274,7 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1;
 }
 .image-item {
   display: flex;
@@ -321,6 +386,13 @@ export default {
   background: #fff;
   border-radius: 14px;
   border: 1px solid #e3e8ef;
+}
+
+.load-tip {
+  padding: 12px 0;
+  text-align: center;
+  font-size: 12px;
+  color: #888;
 }
 
 @media (max-width: 900px) {
