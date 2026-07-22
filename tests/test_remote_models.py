@@ -1,4 +1,6 @@
 import importlib.util
+import io
+import json
 import os
 import sys
 import types
@@ -43,6 +45,50 @@ class RemoteModelConfigurationTest(unittest.TestCase):
             server, '/root/autodl-tmp/output/exp_a/weights/../../secret/best.pt'))
         self.assertIsNone(remote_models.validated_model_path(
             server, '/root/autodl-tmp/other/exp_a/weights/best.pt'))
+
+    def test_reads_class_names_from_experiment_dataset(self):
+        files = {
+            '/root/autodl-tmp/output/exp_a/args.yaml': b'data: /root/autodl-tmp/data/dataset.yaml\n',
+            '/root/autodl-tmp/data/dataset.yaml': b'nc: 3\nnames:\n  0: HM\n  1: QHS\n  2: FSC\n'
+        }
+
+        class FakeSftp:
+            def stat(self, path):
+                if path not in files:
+                    raise OSError
+                return types.SimpleNamespace(st_size=len(files[path]))
+
+            def open(self, path, mode):
+                return io.BytesIO(files[path])
+
+        info = remote_models.read_category_info(
+            FakeSftp(), {'root': '/root/autodl-tmp'}, '/root/autodl-tmp/output/exp_a')
+        self.assertEqual(info['class_names'], ['HM', 'QHS', 'FSC'])
+        self.assertEqual(info['class_count'], 3)
+
+    def test_reads_generated_class_metrics_and_validates_dataset_path(self):
+        metrics_path = '/root/autodl-tmp/output/exp_a/class_metrics.json'
+        files = {metrics_path: json.dumps({'class_metrics': [
+            {'class': 'HM', 'ap50': 0.8}, {'class': 'FSC', 'ap50': 0.7}
+        ]}).encode('utf-8')}
+
+        class FakeSftp:
+            def stat(self, path):
+                if path not in files:
+                    raise OSError
+                return types.SimpleNamespace(st_size=len(files[path]))
+
+            def open(self, path, mode):
+                return io.BytesIO(files[path])
+
+        info = remote_models.read_class_metrics(FakeSftp(), '/root/autodl-tmp/output/exp_a')
+        self.assertTrue(info['has_class_metrics'])
+        self.assertEqual(info['class_metrics_count'], 2)
+        server = {'root': '/root/autodl-tmp'}
+        self.assertEqual(remote_models.validated_dataset_path(
+            server, '/root/autodl-tmp/hrsc/dataset.yaml'),
+            '/root/autodl-tmp/hrsc/dataset.yaml')
+        self.assertIsNone(remote_models.validated_dataset_path(server, '/etc/passwd'))
 
 
 if __name__ == '__main__':

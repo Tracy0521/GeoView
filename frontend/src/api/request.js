@@ -18,14 +18,19 @@ export function request(config) {
     (response) => {
         hideFullScreenLoading()
       if(response.data.code!==0){
-          ElMessage.error(response.data.msg)
-        return Promise.reject()
+          const message=response.data.msg||'请求失败'
+          ElMessage.error(message)
+        return Promise.reject(new Error(message))
       }
       return response
     },
-    ({ response }) => {
+    ({ response, message }) => {
       hideFullScreenLoading()
-      return Promise.reject('网络异常，请检查后端服务是否启动')
+      const errorMessage=response&&response.data&&response.data.msg
+        ? response.data.msg
+        : (message||'网络异常，请检查后端服务是否启动')
+      ElMessage.error(errorMessage)
+      return Promise.reject(new Error(errorMessage))
     },
   )
   return instance(config)

@@ -11,6 +11,10 @@ class Dataset(db.Model):
     image_count = db.Column(db.Integer, default=0)
     box_count = db.Column(db.Integer, default=0)
     class_count = db.Column(db.Integer, default=0)
+    source_type = db.Column(db.String(20), default='local')
+    source_server = db.Column(db.String(80), default='')
+    remote_path = db.Column(db.String(500), default='')
+    sync_status = db.Column(db.String(20), default='synced')
 
     images = db.relationship("DatasetImage", back_populates="dataset", cascade="all, delete-orphan")
 

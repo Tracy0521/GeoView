@@ -13,6 +13,12 @@ export const getRemoteModels = id => request({
 export const importRemoteModel = (id, data) => request({
   url: `/api/model-rank/projects/${id}/remote-models/import`, method: 'post', data
 })
+export const generateRemoteClassMetrics = (id, data) => request({
+  url: `/api/model-rank/projects/${id}/remote-models/class-metrics`, method: 'post', data
+})
+export const getRemoteClassMetricsStatus = (id, serverId) => request({
+  url: `/api/model-rank/projects/${id}/remote-models/class-metrics/status`, method: 'get', params: { server_id: serverId }
+})
 export const updateModel = (projectId, modelId, data) => request({
   url: `/api/model-rank/projects/${projectId}/models/${modelId}`, method: 'patch', data
 })

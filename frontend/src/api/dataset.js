@@ -20,6 +20,12 @@ export const getDataset = id =>
 export const createDataset = data =>
   request({ url: '/api/dataset/create', method: 'post', data })
 
+export const getRemoteDatasets = () =>
+  request({ url: '/api/dataset/remote', method: 'get' })
+
+export const importRemoteDataset = data =>
+  request({ url: '/api/dataset/remote/import', method: 'post', data })
+
 export const renameDataset = (id, name) =>
   request({ url: `/api/dataset/${id}/rename`, method: 'put', data: { name } })
 

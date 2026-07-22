@@ -7,7 +7,7 @@
         <h1>遥感影像与 YOLO 标注</h1>
         <p>上传、校验和管理 25 类遥感时敏目标数据集，支持舰船、飞机、发射车三大类标注。</p>
       </div>
-      <button class="dark-button" @click="openCreateDialog">＋ 新建数据集</button>
+      <div class="header-actions"><button class="remote-button" @click="openRemoteDialog">⌁ 从远程服务器读取</button><button class="dark-button" @click="openCreateDialog">＋ 新建数据集</button></div>
     </header>
 
     <!-- 统计栏 -->
@@ -115,6 +115,7 @@
               {{ ds.class_count }} 类
             </p>
             <small>上传于 {{ formatTime(ds.updated_at) }}</small>
+            <small v-if="ds.source_type==='remote'" class="remote-source-meta">{{ ds.source_server }} · {{ ds.sync_status==='synced'?'已同步':'同步中' }}<br>{{ ds.remote_path }}</small>
           </div>
 
           <div class="card-actions">
@@ -145,6 +146,21 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="remoteVisible" title="从远程服务器读取数据集" width="760px" :close-on-click-modal="false">
+      <div class="remote-dialog-head"><div><strong>远程 YOLO 数据集</strong><p>扫描 dataset.yaml，并将图片、标签和 train/val/test 划分同步到本地数据集库。</p></div><el-button size="small" :loading="remoteLoading" @click="loadRemoteDatasets">刷新</el-button></div>
+      <div v-if="remoteServers.length" class="remote-server-list"><span v-for="server in remoteServers" :key="server.id" :class="['remote-server',server.status]"><i/>{{ server.name }}：{{ server.status==='online'?`${server.dataset_count} 个数据集`:server.message }}</span></div>
+      <div v-loading="remoteLoading" class="remote-dataset-list">
+        <label v-for="dataset in remoteDatasets" :key="`${dataset.server_id}:${dataset.dataset_path}`" :class="['remote-dataset-row',{selected:selectedRemoteKey===`${dataset.server_id}::${dataset.dataset_path}`,disabled:dataset.sync_status==='synced'}]">
+          <input v-model="selectedRemoteKey" type="radio" :value="`${dataset.server_id}::${dataset.dataset_path}`" :disabled="dataset.sync_status==='synced'">
+          <span class="remote-dataset-main"><strong>{{ dataset.name }}</strong><small>{{ dataset.server_name }} · {{ dataset.image_count }} 张图片 · {{ dataset.label_count }} 个标签 · {{ dataset.class_count }} 类 · {{ formatSize(dataset.total_size) }}</small><small class="remote-dataset-path">{{ dataset.dataset_path }}</small><small v-if="dataset.class_names.length" class="remote-classes">{{ dataset.class_names.join('、') }}</small></span>
+          <em :class="dataset.sync_status">{{ dataset.sync_status==='synced'?'已同步':'可同步' }}</em>
+        </label>
+        <div v-if="!remoteLoading&&!remoteDatasets.length" class="remote-empty">未发现可读取的 dataset.yaml，请确认远程实例在线。</div>
+      </div>
+      <p class="remote-note">同步会复制远程文件并写入本地数据库；大型数据集可能耗时较长，同步期间请保持服务器在线且不要关闭页面。</p>
+      <template #footer><el-button @click="remoteVisible=false">取消</el-button><el-button type="primary" :loading="remoteImporting" :disabled="!selectedRemoteDataset" @click="confirmRemoteImport">同步到本地数据集库</el-button></template>
+    </el-dialog>
+
     <!-- 重命名弹窗 -->
     <el-dialog v-model="renameVisible" title="重命名数据集" width="460px">
       <el-input v-model="renameForm.name" maxlength="60" />
@@ -160,6 +176,8 @@
 import {
   getDatasetStats,
   getDatasets,
+  getRemoteDatasets,
+  importRemoteDataset,
   createDataset,
   renameDataset,
   deleteDataset,
@@ -201,8 +219,19 @@ export default {
       renaming: false,
       renameForm: { id: '', name: '' },
       previewDatasetId: null,
-      previewReady: false
+      previewReady: false,
+      remoteVisible: false,
+      remoteLoading: false,
+      remoteImporting: false,
+      remoteServers: [],
+      remoteDatasets: [],
+      selectedRemoteKey: ''
     }
+  },
+  computed: {
+    selectedRemoteServerId() { return this.selectedRemoteKey.split('::', 1)[0] || '' },
+    selectedRemotePath() { return this.selectedRemoteKey.includes('::') ? this.selectedRemoteKey.slice(this.selectedRemoteKey.indexOf('::') + 2) : '' },
+    selectedRemoteDataset() { return this.remoteDatasets.find(item => item.server_id === this.selectedRemoteServerId && item.dataset_path === this.selectedRemotePath) || null }
   },
   mounted() {
     this.loadAll()
@@ -222,6 +251,43 @@ export default {
     formatTime(iso) {
       if (!iso) return '—'
       return iso.replace('T', ' ').slice(0, 16)
+    },
+    formatSize(size) {
+      const value = Number(size) || 0
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+      if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
+      return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`
+    },
+    openRemoteDialog() {
+      this.remoteVisible = true
+      this.loadRemoteDatasets()
+    },
+    async loadRemoteDatasets() {
+      this.remoteLoading = true
+      try {
+        const res = await getRemoteDatasets()
+        this.remoteServers = res.data.data.servers || []
+        this.remoteDatasets = res.data.data.datasets || []
+        if (this.selectedRemoteDataset?.sync_status === 'synced') this.selectedRemoteKey = ''
+      } catch { /* 拦截器已提示 */ } finally {
+        this.remoteLoading = false
+      }
+    },
+    async confirmRemoteImport() {
+      const dataset = this.selectedRemoteDataset
+      if (!dataset) return this.$message.warning('请选择远程数据集')
+      this.remoteImporting = true
+      try {
+        const res = await importRemoteDataset({ server_id: dataset.server_id, dataset_path: dataset.dataset_path, name: dataset.name })
+        this.remoteVisible = false
+        this.selectedRemoteKey = ''
+        await this.loadAll()
+        const warnings = res.data.data.warnings || []
+        if (warnings.length) this.$message.warning(`数据集已同步，存在 ${warnings.length} 条标注提示`)
+        else this.$message.success('远程数据集同步成功')
+      } catch { /* 拦截器已提示 */ } finally {
+        this.remoteImporting = false
+      }
     },
     async loadAll() {
       try {
@@ -434,6 +500,8 @@ header p { margin: 0; color: #7f899b; font-size: 14px; }
   background: #151515; color: #fff; font-weight: 700; cursor: pointer;
 }
 .dark-button:hover { background: #2a2a2a; }
+.header-actions{display:flex;gap:9px}.remote-button{padding:12px 17px;border:1px solid #bdd8f7;border-radius:10px;background:#f2f8ff;color:#267cd3;font-weight:700;cursor:pointer}.remote-button:hover{border-color:#409eff;background:#e8f3ff}.remote-source-meta{display:block;overflow:hidden;margin-top:5px;color:#3f8d70!important;text-overflow:ellipsis;white-space:nowrap}
+.remote-dialog-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.remote-dialog-head strong{font-size:15px}.remote-dialog-head p{margin:4px 0 0;color:#7e8999;font-size:11px}.remote-server-list{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}.remote-server{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;border-radius:7px;background:#f3f5f8;color:#687486;font-size:11px}.remote-server i{width:7px;height:7px;border-radius:50%;background:#aab2bd}.remote-server.online i{background:#35a86c}.remote-server.offline i{background:#ec5269}.remote-dataset-list{max-height:430px;overflow:auto;border:1px solid #e2e7ed;border-radius:10px}.remote-dataset-row{display:flex;align-items:flex-start;gap:10px;padding:13px 14px;border-bottom:1px solid #edf0f3;cursor:pointer}.remote-dataset-row:last-child{border-bottom:0}.remote-dataset-row:hover,.remote-dataset-row.selected{background:#f3f8ff}.remote-dataset-row.disabled{cursor:not-allowed;opacity:.65}.remote-dataset-row input{margin-top:4px}.remote-dataset-main{min-width:0;flex:1}.remote-dataset-main strong,.remote-dataset-main small{display:block}.remote-dataset-main small{margin-top:4px;color:#7d8998;font-size:11px}.remote-dataset-path{overflow:hidden;color:#52667d!important;font-family:Consolas,monospace;text-overflow:ellipsis;white-space:nowrap}.remote-classes{overflow:hidden;color:#3e7fbf!important;text-overflow:ellipsis;white-space:nowrap}.remote-dataset-row em{padding:4px 7px;border-radius:10px;background:#e9f5ef;color:#23865b;font-size:10px;font-style:normal;white-space:nowrap}.remote-dataset-row em.remote{background:#eaf3ff;color:#337fd1}.remote-empty{padding:55px 20px;text-align:center;color:#929baa;font-size:12px}.remote-note{margin:10px 0 0;color:#9a6e2f;font-size:11px}
 
 /* 统计栏 */
 .stats-bar {
@@ -584,6 +652,7 @@ header p { margin: 0; color: #7f899b; font-size: 14px; }
 @media (max-width: 800px) {
   .dataset-page { padding: 24px 16px; }
   .dataset-page header { flex-direction: column; align-items: flex-start; gap: 16px; }
+  .header-actions{width:100%;flex-wrap:wrap}
   .stats-bar { grid-template-columns: 1fr 1fr; }
 }
 </style>

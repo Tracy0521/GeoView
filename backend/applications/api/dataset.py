@@ -7,11 +7,13 @@
 import io
 import json
 import os
+import posixpath
 import random
 import shutil
 import threading
 import uuid
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from PIL import Image
 
@@ -24,6 +26,8 @@ from applications.common.path_global import (
 from applications.common.utils.http import fail_api, success_api
 from applications.extensions import db
 from applications.models.dataset_model import Dataset, DatasetImage, DatasetAnnotation, ImageInfo
+from applications.services.remote_datasets import download_dataset, scan_server_datasets
+from applications.services.remote_models import configured_servers, get_server, public_server
 
 dataset_api = Blueprint('dataset_api', __name__, url_prefix='/api/dataset')
 dataset_static = Blueprint(
@@ -216,7 +220,7 @@ def _build_image_dict(img_model: DatasetImage):
     }
 
 
-def _add_image_record(dataset_id: str, full_img_path: str, image_filename: str, annotations: list, warnings: list, file_size: int):
+def _add_image_record(dataset_id: str, full_img_path: str, image_filename: str, annotations: list, warnings: list, file_size: int, split: str = 'unset', commit: bool = True):
     """
     【新版数据库写入核心函数，替代旧版_add_image_to_dataset】
     1. 写入dataset_image主记录
@@ -244,6 +248,8 @@ def _add_image_record(dataset_id: str, full_img_path: str, image_filename: str, 
     if exist_img:
         img_model = exist_img
         img_model.warnings = warning_str
+        img_model.split = split
+        img_model.box_count = len(annotations)
         # 清空原有标注
         DatasetAnnotation.query.filter_by(image_id=img_model.id).delete()
     else:
@@ -254,7 +260,7 @@ def _add_image_record(dataset_id: str, full_img_path: str, image_filename: str, 
             label_filename=label_filename,
             url=_image_url(dataset_id, image_filename),
             box_count=len(annotations),
-            split="unset",
+            split=split,
             warnings=warning_str
         )
         db.session.add(img_model)
@@ -289,7 +295,10 @@ def _add_image_record(dataset_id: str, full_img_path: str, image_filename: str, 
         info_model.height = height
         info_model.channels = channels
         info_model.file_size = file_size
-    db.session.commit()
+    if commit:
+        db.session.commit()
+    else:
+        db.session.flush()
     return _build_image_dict(img_model)
 
 
@@ -573,9 +582,108 @@ def get_dataset_list():
             "image_count": ds.image_count,
             "box_count": ds.box_count,
             "class_count": ds.class_count,
+            "source_type": ds.source_type or 'local',
+            "source_server": ds.source_server or '',
+            "remote_path": ds.remote_path or '',
+            "sync_status": ds.sync_status or 'synced',
             "images": img_arr
         })
     return success_api(data=result)
+
+
+@dataset_api.get('/remote')
+def remote_dataset_list():
+    synced = {(ds.source_server or '', ds.remote_path or '') for ds in Dataset.query.filter_by(source_type='remote').all()}
+    configured = configured_servers()
+
+    def inspect_server(server):
+        server_data = public_server(server)
+        try:
+            datasets = scan_server_datasets(server)
+            server_data.update({'status': 'online', 'message': '', 'dataset_count': len(datasets)})
+            return server, server_data, datasets, ''
+        except Exception as error:
+            server_data.update({'status': 'offline', 'message': '连接失败或实例未启动', 'dataset_count': 0})
+            return server, server_data, [], str(error)
+
+    servers = []
+    datasets = []
+    with ThreadPoolExecutor(max_workers=min(4, max(1, len(configured)))) as executor:
+        scanned = list(executor.map(inspect_server, configured))
+    for server, server_data, candidates, error in scanned:
+        if error:
+            current_app.logger.warning('Remote dataset scan failed for %s: %s', server['name'], error)
+        for candidate in candidates:
+            candidate.update({'server_id': server['id'], 'server_name': server['name'],
+                              'sync_status': 'synced' if (server['name'], candidate['dataset_path']) in synced else 'remote'})
+            candidate.pop('files', None)
+            datasets.append(candidate)
+        servers.append(server_data)
+    return success_api(data={'servers': servers, 'datasets': datasets})
+
+
+@dataset_api.post('/remote/import')
+def remote_dataset_import():
+    data = request.get_json(silent=True) or {}
+    server = get_server(data.get('server_id'))
+    if not server:
+        return fail_api('远程服务器不存在或未配置')
+    remote_path = str(data.get('dataset_path', '')).strip()
+    if Dataset.query.filter_by(source_type='remote', source_server=server['name'], remote_path=remote_path).first():
+        return fail_api('该远程数据集已经同步')
+    dataset_id = uuid.uuid4().hex[:12]
+    name = str(data.get('name', '')).strip()[:60] or '远程数据集_{}'.format(datetime.now().strftime('%m%d_%H%M'))
+    ds_model = Dataset(id=dataset_id, name=name, image_count=0, box_count=0, class_count=0,
+                       source_type='remote', source_server=server['name'], remote_path=remote_path,
+                       sync_status='syncing')
+    db.session.add(ds_model)
+    db.session.commit()
+    warnings_log = []
+
+    def receive_file(sftp, item, destination, index, total):
+        image_name = _unique_filename(_images_dir(dataset_id), posixpath.basename(item['image_path']))
+        image_path = os.path.join(_images_dir(dataset_id), image_name)
+        if int(item.get('size') or 0) > MAX_IMAGE_SIZE:
+            warnings_log.append('{} 超过单图 100MB 限制'.format(posixpath.basename(item['image_path'])))
+            return
+        sftp.get(item['image_path'], image_path)
+        label_path = os.path.join(_labels_dir(dataset_id), os.path.splitext(image_name)[0] + LABEL_EXTENSION)
+        annotations = []
+        label_warnings = []
+        if item.get('label_path'):
+            sftp.get(item['label_path'], label_path)
+            annotations, label_warnings = _read_label_file(label_path)
+        else:
+            label_warnings = ['缺少同名 txt 标注文件']
+        warnings_log.extend(['{}: {}'.format(image_name, warning) for warning in label_warnings])
+        _add_image_record(dataset_id, image_path, image_name, annotations, label_warnings,
+                          os.path.getsize(image_path), item.get('split', 'unset'), commit=False)
+        if index % 100 == 0:
+            db.session.commit()
+
+    try:
+        dataset = download_dataset(server, remote_path, _dataset_dir(dataset_id), receive_file)
+        ds_model = Dataset.query.get(dataset_id)
+        _sync_dataset_stat(ds_model)
+        ds_model.sync_status = 'synced'
+        ds_model.updated_at = datetime.now()
+        db.session.commit()
+        return success_api(msg='远程数据集同步成功', data={
+            'id': ds_model.id, 'name': ds_model.name, 'image_count': ds_model.image_count,
+            'box_count': ds_model.box_count, 'class_count': ds_model.class_count,
+            'source_server': ds_model.source_server, 'remote_path': ds_model.remote_path,
+            'sync_status': ds_model.sync_status, 'warnings': warnings_log[:200],
+            'remote_class_names': dataset.get('class_names', [])
+        })
+    except Exception as error:
+        current_app.logger.warning('Remote dataset import failed from %s: %s', server['name'], error)
+        db.session.rollback()
+        failed = Dataset.query.get(dataset_id)
+        if failed:
+            db.session.delete(failed)
+            db.session.commit()
+        shutil.rmtree(_dataset_dir(dataset_id), ignore_errors=True)
+        return fail_api('远程数据集同步失败，请确认服务器在线且数据集结构可读')
 
 
 @dataset_api.post('/create')
@@ -608,6 +716,10 @@ def dataset_create():
         "image_count": 0,
         "box_count": 0,
         "class_count": 0,
+        "source_type": "local",
+        "source_server": "",
+        "remote_path": "",
+        "sync_status": "synced",
         "images": []
     }
     return success_api(msg='数据集创建成功', data=resp_data)
@@ -628,6 +740,10 @@ def dataset_detail(dataset_id):
         "image_count": ds.image_count,
         "box_count": ds.box_count,
         "class_count": ds.class_count,
+        "source_type": ds.source_type or 'local',
+        "source_server": ds.source_server or '',
+        "remote_path": ds.remote_path or '',
+        "sync_status": ds.sync_status or 'synced',
         "images": img_list
     }
     return success_api(data=resp)

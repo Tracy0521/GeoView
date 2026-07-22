@@ -15,8 +15,8 @@ from applications.common.utils.http import fail_api, success_api
 from applications.extensions import db
 from applications.models.model_rank import ModelProject, ModelRecord
 from applications.services.remote_models import (
-    configured_servers, download_candidate, get_server, public_server, scan_server,
-    validated_model_path
+    class_metrics_generation_status, configured_servers, download_candidate, get_server,
+    launch_class_metrics_generation, public_server, scan_server, validated_model_path
 )
 
 model_rank_api = Blueprint('model_rank_api', __name__, url_prefix='/api/model-rank')
@@ -269,6 +269,16 @@ def _clean_metrics(raw, model_name=''):
     metrics = {}
     if not isinstance(raw, dict):
         return metrics
+    raw_class_names = raw.get('class_names', [])
+    if isinstance(raw_class_names, dict):
+        raw_class_names = [value for _, value in sorted(raw_class_names.items(), key=lambda item: str(item[0]))]
+    if isinstance(raw_class_names, list):
+        class_names = [str(value).strip()[:80] for value in raw_class_names if str(value).strip()]
+        if class_names:
+            metrics['class_names'] = class_names[:1000]
+    dataset_path = str(raw.get('dataset_path', '')).strip()
+    if dataset_path:
+        metrics['dataset_path'] = dataset_path[:500]
     for key in METRIC_KEYS:
         values = raw.get(key, [])
         if isinstance(values, list):
@@ -533,6 +543,12 @@ def remote_model_import(project_id):
         metrics = {}
         if downloaded['results']:
             metrics = _metrics_from_csv(io.BytesIO(downloaded['results']))
+        if downloaded.get('class_names'):
+            metrics['class_names'] = downloaded['class_names']
+        if downloaded.get('dataset_path'):
+            metrics['dataset_path'] = downloaded['dataset_path']
+        if downloaded.get('class_metrics'):
+            metrics['class_metrics'] = downloaded['class_metrics']
     except (ValueError, UnicodeError) as error:
         if os.path.exists(temporary_path):
             os.remove(temporary_path)
@@ -566,6 +582,38 @@ def remote_model_import(project_id):
         project['updated_at'] = now
         _write_projects(projects)
     return success_api(msg='远程模型同步成功', data=model)
+
+
+@model_rank_api.post('/projects/<string:project_id>/remote-models/class-metrics')
+def remote_class_metrics_generate(project_id):
+    if not _find_project(_read_projects(), project_id):
+        return fail_api('项目不存在')
+    data = request.get_json(silent=True) or {}
+    server = get_server(data.get('server_id'))
+    if not server:
+        return fail_api('远程服务器不存在或未配置')
+    try:
+        result = launch_class_metrics_generation(server, str(data.get('dataset_path', '')).strip())
+        return success_api(msg='逐类别验证任务已启动', data=result)
+    except ValueError as error:
+        return fail_api(str(error))
+    except Exception as error:
+        current_app.logger.warning('Remote class validation launch failed for %s: %s', server['name'], error)
+        return fail_api('无法启动远程验证，请确认实例在线且训练环境可用')
+
+
+@model_rank_api.get('/projects/<string:project_id>/remote-models/class-metrics/status')
+def remote_class_metrics_status(project_id):
+    if not _find_project(_read_projects(), project_id):
+        return fail_api('项目不存在')
+    server = get_server(request.args.get('server_id'))
+    if not server:
+        return fail_api('远程服务器不存在或未配置')
+    try:
+        return success_api(data=class_metrics_generation_status(server))
+    except Exception as error:
+        current_app.logger.warning('Remote class validation status failed for %s: %s', server['name'], error)
+        return fail_api('无法读取远程验证状态')
 
 
 @model_rank_api.patch('/projects/<string:project_id>/models/<string:model_id>')
