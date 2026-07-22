@@ -3,152 +3,245 @@
     <header class="page-header">
       <div>
         <div class="back" @click="$router.push('/dataset-management')">← 返回数据集列表</div>
-        <h1>{{ dataset.name }}</h1>
+        <div class="title-row">
+          <h1 v-if="!editName">{{ dataset.name }}</h1>
+          <el-input
+              v-else
+              v-model="dataset.name"
+              size="large"
+              @blur="saveDatasetInfo"
+              @keyup.enter="saveDatasetInfo"
+          />
+          <button class="edit-btn" @click="editName = !editName">
+            {{ editName ? '保存' : '编辑' }}
+          </button>
+        </div>
         <p class="meta">
           {{ dataset.image_count }} 张影像 · {{ dataset.box_count }} 个标注框 ·
           {{ dataset.class_count }} 类 · 更新于 {{ formatTime(dataset.updated_at) }}
         </p>
+        <!-- 数据集简介 -->
+        <div class="desc-row">
+          <el-input
+              v-model="dataset.description"
+              type="textarea"
+              :rows="2"
+              placeholder="添加数据集简介"
+              clearable
+              @blur="saveDatasetInfo"
+          />
+        </div>
       </div>
       <button class="dark-button" @click="doExport">导出 YOLO</button>
     </header>
 
-    <!-- 顶部工具栏（参考Ultralytics） -->
-    <div class="toolbar">
-      <el-input v-model="keyword" clearable placeholder="搜索文件名…" class="search-input" @input="onSearchChange"/>
-
-      <div class="toolbar-right">
-        <!-- 显隐控制按钮 -->
-        <div class="dropdown-wrap">
-          <button class="tool-btn" @click="visiblePopover = !visiblePopover">
-            <span>👁</span>
-          </button>
-          <div v-if="visiblePopover" class="dropdown-menu visible-menu">
-            <div class="menu-title">Visibility</div>
-            <label class="menu-item">
-              <input type="checkbox" v-model="showAnnotations"> Annotations
-            </label>
-            <label class="menu-item">
-              <input type="checkbox" v-model="showClassLabel"> Class labels
-            </label>
-          </div>
-        </div>
-
-        <!-- 视图模式切换 -->
-        <div class="view-switch">
-          <button
-              v-for="mode in viewModeList"
-              :key="mode.value"
-              class="tool-btn"
-              :class="{ active: viewMode === mode.value }"
-              @click="viewMode = mode.value"
-              :title="mode.label"
-          >
-            {{ mode.icon }}
-          </button>
-        </div>
-      </div>
+    <!-- Tab 标签导航 -->
+    <div class="tab-nav">
+      <button
+          v-for="tab in tabList"
+          :key="tab.value"
+          class="tab-item"
+          :class="{ active: activeTab === tab.value }"
+          @click="activeTab = tab.value"
+      >
+        {{ tab.label }}
+      </button>
     </div>
 
-    <!-- 图片主区域 -->
-    <div class="image-container">
-      <!-- Grid 网格视图 -->
-      <div v-if="viewMode === 'grid'" class="grid-view">
-        <div
-            v-for="img in pageImages"
-            :key="img.id"
-            class="grid-card"
-            :class="{ active: selectedImage?.id === img.id }"
-            @click="openImageViewer(img)"
-        >
-          <div class="preview-box">
-            <canvas
-                ref="gridCanvas"
-                class="grid-canvas"
-                :data-img-id="img.id"
-            ></canvas>
-          </div>
-          <div class="card-footer">
-            <div class="filename">{{ img.filename }}</div>
-            <div class="info-text">{{ img.box_count }} 框</div>
-          </div>
-        </div>
-      </div>
+    <!-- ========== Images 标签页（原有图片分页模块） ========== -->
+    <div v-if="activeTab === 'images'" class="tab-content">
+      <!-- 顶部工具栏（参考Ultralytics） -->
+      <div class="toolbar">
+        <el-input v-model="keyword" clearable placeholder="搜索文件名…" class="search-input" @input="onSearchChange"/>
 
-      <!-- Compact 紧凑列表 -->
-      <div v-if="viewMode === 'compact'" class="compact-view">
-        <div
-            v-for="img in pageImages"
-            :key="img.id"
-            class="compact-item"
-            :class="{ active: selectedImage?.id === img.id }"
-            @click="openImageViewer(img)"
-        >
-          <div class="thumb-wrap">
-            <canvas class="compact-canvas" :data-img-id="img.id"></canvas>
-          </div>
-          <div class="compact-text">
-            <div class="filename">{{ img.filename }}</div>
-            <div class="info-text">
-              {{ img.box_count }} 标注框
-              <template v-if="img.split && img.split !== 'unset'">
-                · {{ img.split === 'train' ? '训练集' : '验证集' }}
-              </template>
+        <div class="toolbar-right">
+          <!-- 显隐控制按钮 -->
+          <div class="dropdown-wrap">
+            <button class="tool-btn" @click="visiblePopover = !visiblePopover">
+              <span>👁</span>
+            </button>
+            <div v-if="visiblePopover" class="dropdown-menu visible-menu">
+              <div class="menu-title">Visibility</div>
+              <label class="menu-item">
+                <input type="checkbox" v-model="showAnnotations"> Annotations
+              </label>
+              <label class="menu-item">
+                <input type="checkbox" v-model="showClassLabel"> Class labels
+              </label>
             </div>
           </div>
+
+          <!-- 视图模式切换 -->
+          <div class="view-switch">
+            <button
+                v-for="mode in viewModeList"
+                :key="mode.value"
+                class="tool-btn"
+                :class="{ active: viewMode === mode.value }"
+                @click="viewMode = mode.value"
+                :title="mode.label"
+            >
+              {{ mode.icon }}
+            </button>
+          </div>
         </div>
       </div>
 
-      <!-- Table 表格视图 -->
-      <div v-if="viewMode === 'table'" class="table-view">
-        <table>
-          <thead>
-          <tr>
-            <th>预览</th>
-            <th>文件名</th>
-            <th>标注数量</th>
-            <th>数据集划分</th>
-          </tr>
-          </thead>
-          <tbody>
-          <tr
+      <!-- 图片主区域 -->
+      <div class="image-container">
+        <!-- Grid 网格视图 -->
+        <div v-if="viewMode === 'grid'" class="grid-view">
+          <div
               v-for="img in pageImages"
               :key="img.id"
+              class="grid-card"
               :class="{ active: selectedImage?.id === img.id }"
               @click="openImageViewer(img)"
           >
-            <td>
-              <div class="table-thumb">
-                <canvas class="table-canvas" :data-img-id="img.id"></canvas>
+            <div class="preview-box">
+              <canvas
+                  ref="gridCanvas"
+                  class="grid-canvas"
+                  :data-img-id="img.id"
+              ></canvas>
+            </div>
+            <div class="card-footer">
+              <div class="filename">{{ img.filename }}</div>
+              <div class="info-text">{{ img.box_count }} 框</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Compact 紧凑列表 -->
+        <div v-if="viewMode === 'compact'" class="compact-view">
+          <div
+              v-for="img in pageImages"
+              :key="img.id"
+              class="compact-item"
+              :class="{ active: selectedImage?.id === img.id }"
+              @click="openImageViewer(img)"
+          >
+            <div class="thumb-wrap">
+              <canvas class="compact-canvas" :data-img-id="img.id"></canvas>
+            </div>
+            <div class="compact-text">
+              <div class="filename">{{ img.filename }}</div>
+              <div class="info-text">
+                {{ img.box_count }} 标注框
+                <template v-if="img.split && img.split !== 'unset'">
+                  · {{ img.split === 'train' ? '训练集' : '验证集' }}
+                </template>
               </div>
-            </td>
-            <td>{{ img.filename }}</td>
-            <td>{{ img.box_count }}</td>
-            <td>{{ getSplitName(img.split) }}</td>
+            </div>
+          </div>
+        </div>
+
+        <!-- Table 表格视图 -->
+        <div v-if="viewMode === 'table'" class="table-view">
+          <table>
+            <thead>
+            <tr>
+              <th>预览</th>
+              <th>文件名</th>
+              <th>标注数量</th>
+              <th>数据集划分</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr
+                v-for="img in pageImages"
+                :key="img.id"
+                :class="{ active: selectedImage?.id === img.id }"
+                @click="openImageViewer(img)"
+            >
+              <td>
+                <div class="table-thumb">
+                  <canvas class="table-canvas" :data-img-id="img.id"></canvas>
+                </div>
+              </td>
+              <td>{{ img.filename }}</td>
+              <td>{{ img.box_count }}</td>
+              <td>{{ getSplitName(img.split) }}</td>
+            </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div v-if="loading" class="load-tip">加载中……</div>
+        <div v-if="pageImages.length === 0 && !loading" class="empty-tip">暂无影像数据</div>
+      </div>
+
+      <!-- ========== 新增底部分页控件 ========== -->
+      <div class="pagination-bar" v-if="total > 0">
+        <span class="page-info">共 {{ total }} 条</span>
+        <button class="page-btn" :disabled="currentPage <=1" @click="changePage(currentPage -1)">上一页</button>
+
+        <span class="page-jump-wrap">
+          第
+          <input
+              class="page-input"
+              v-model.number="jumpPageNum"
+              @keyup.enter="handleJumpPage"
+          />
+          / {{ maxPage }} 页
+        </span>
+
+        <button class="page-btn" :disabled="currentPage >= maxPage" @click="changePage(currentPage +1)">下一页</button>
+      </div>
+    </div>
+
+    <!-- ========== Classes 标签页（预留，后续开发） ========== -->
+    <div v-if="activeTab === 'classes'" class="tab-content">
+      <div class="chart-card">
+        <h3>Class Distribution</h3>
+        <div class="chart-box">类别分布柱状图区域（对接接口后渲染echarts）</div>
+      </div>
+
+      <div class="class-table-wrap">
+        <div class="table-head-row">
+          <h3>类别列表</h3>
+          <div class="add-class-row">
+            <el-input v-model="newClassName" placeholder="输入类别名称" />
+            <button class="dark-btn small" @click="addClass">新增类别</button>
+          </div>
+        </div>
+        <table class="class-table">
+          <thead>
+          <tr>
+            <th>ID</th>
+            <th>类别名称</th>
+            <th>标注数量</th>
+          </tr>
+          </thead>
+          <tbody>
+          <tr>
+            <td colspan="3" class="empty-row">等待后端接口返回类别数据</td>
           </tr>
           </tbody>
         </table>
       </div>
-
-      <div v-if="loading" class="load-tip">加载中……</div>
-      <div v-if="pageImages.length === 0 && !loading" class="empty-tip">暂无影像数据</div>
     </div>
 
-    <!-- ========== 新增底部分页控件 ========== -->
-    <div class="pagination-bar" v-if="total > 0">
-      <span class="page-info">共 {{ total }} 条</span>
-      <button class="page-btn" :disabled="currentPage <=1" @click="changePage(currentPage -1)">上一页</button>
-
-      <span class="page-jump-wrap">
-        第
-        <input
-            class="page-input"
-            v-model.number="jumpPageNum"
-            @keyup.enter="handleJumpPage"
-        />
-        / {{ maxPage }} 页
-      </span>
-
-      <button class="page-btn" :disabled="currentPage >= maxPage" @click="changePage(currentPage +1)">下一页</button>
+    <!-- ========== Charts 标签页（预留，后续开发） ========== -->
+    <div v-if="activeTab === 'charts'" class="tab-content">
+      <div class="chart-grid">
+        <div class="chart-card">
+          <h3>划分分布 Train / Val</h3>
+          <div class="chart-box">划分饼图</div>
+        </div>
+        <div class="chart-card">
+          <h3>Top Classes</h3>
+          <div class="chart-box">Top类别饼图</div>
+        </div>
+        <div class="chart-card">
+          <h3>图片尺寸分布</h3>
+          <div class="chart-box">宽高分布图</div>
+        </div>
+        <div class="chart-card">
+          <h3>单图标注数量分布</h3>
+          <div class="chart-box">单图标注柱状图</div>
+        </div>
+      </div>
     </div>
 
     <!-- 大图查看弹窗 -->
@@ -188,6 +281,15 @@
 </template>
 
 <script>
+import {
+  getClassBarOption,
+  getSplitPieOption,
+  getTopClassPieOption,
+  getObjPerImageBarOption,
+  getImageSizeBarOption,
+  disposeChart
+} from './datasetChartHelper'
+import * as echarts from 'echarts'
 import { getDataset, exportDatasetUrl } from '@/api/dataset'
 import { drawAnnotations } from '@/utils/annotationDrawer'
 import { CATEGORY_GROUPS, getBoxColor, getCategoryGroup } from '@/utils/datasetConstants'
@@ -200,6 +302,15 @@ export default {
       dataset: null,
       keyword: '',
       selectedImage: null,
+      editName: false,
+
+      // Tab 配置
+      activeTab: 'images',
+      tabList: [
+        { label: 'Images', value: 'images' },
+        { label: 'Classes', value: 'classes' },
+        { label: 'Charts', value: 'charts' }
+      ],
 
       // 视图控制
       viewMode: 'grid',
@@ -212,14 +323,17 @@ export default {
       showAnnotations: true,
       showClassLabel: true,
 
-      // ========== 传统分页配置（移除无限滚动）==========
+      // 传统分页配置
       pageSize: 20,
       currentPage: 1,
       total: 0,
       maxPage: 1,
       jumpPageNum: 1,
       loading: false,
-      _pageData: []
+      _pageData: [],
+
+      // Classes页面临时变量
+      newClassName: ''
     }
   },
   computed: {
@@ -237,6 +351,10 @@ export default {
         this.resetPage()
         this.loadDatasetBase()
       }
+    },
+    activeTab() {
+      // 切换标签自动关闭大图弹窗
+      this.selectedImage = null
     },
     // 切换显隐选项，重绘所有缩略图
     showAnnotations() {
@@ -289,6 +407,13 @@ export default {
       this.loadImagePage()
     },
 
+    // 保存数据集名称、简介（后续对接接口实现）
+    async saveDatasetInfo() {
+      console.log('保存数据集信息', this.dataset.name, this.dataset.description)
+      // 此处调用后端接口 updateDatasetInfo
+      this.editName = false
+    },
+
     // 重置分页状态（切换数据集时调用）
     resetPage() {
       this.currentPage = 1
@@ -296,6 +421,7 @@ export default {
       this.maxPage = 1
       this.jumpPageNum = 1
       this.selectedImage = null
+      this._pageData = []
     },
 
     // 只加载数据集基础信息，不带图片
@@ -304,6 +430,8 @@ export default {
         const res = await getDataset(this.$route.params.id, { page: 0, limit: 0 })
         const { images, ...baseInfo } = res.data.data
         this.dataset = baseInfo
+        // 兼容后端没有description字段
+        if (!this.dataset.description) this.dataset.description = ''
         await this.loadImagePage()
       } catch {
         this.$router.replace('/dataset-management')
@@ -323,8 +451,6 @@ export default {
         this._pageData = data.images || []
         this.total = data.pagination?.total || 0
         this.maxPage = Math.ceil(this.total / this.pageSize) || 1
-
-        // 删除默认选中第一张
       } catch (err) {
         console.error('分页加载图片失败：', err)
       } finally {
@@ -336,11 +462,12 @@ export default {
     // 切换页码
     changePage(page) {
       if (page < 1 || page > this.maxPage || page === this.currentPage) return
+      this.selectedImage = null
       this.currentPage = page
       this.loadImagePage()
     },
 
-    // 输入框跳转页码
+    // 输入页码跳转
     handleJumpPage() {
       let num = Number(this.jumpPageNum)
       if (isNaN(num)) num = this.currentPage
@@ -349,7 +476,6 @@ export default {
       this.changePage(num)
     },
 
-    // 打开大图弹窗
     openImageViewer(img) {
       this.selectedImage = img
       this.$nextTick(() => this.renderSelectedBig())
@@ -358,7 +484,6 @@ export default {
       this.selectedImage = null
     },
 
-    // 绘制大图弹窗（携带显隐参数）
     renderSelectedBig() {
       if (!this.selectedImage) return
       const canvas = this.$refs.viewerCanvas
@@ -374,7 +499,6 @@ export default {
       img.src = this.fullUrl(this.selectedImage.url)
     },
 
-    // 批量重绘所有缩略图
     redrawAllThumb() {
       const canvasList = document.querySelectorAll('[data-img-id]')
       canvasList.forEach(canvas => {
@@ -388,22 +512,27 @@ export default {
           canvas.width = canvas.offsetWidth
           canvas.height = canvas.offsetHeight
           ctx.clearRect(0, 0, canvas.width, canvas.height)
-          // 等比绘制原图
           const scale = Math.min(canvas.width / image.width, canvas.height / image.height)
           const w = image.width * scale
           const h = image.height * scale
           const x = (canvas.width - w) / 2
           const y = (canvas.height - h) / 2
           ctx.drawImage(image, x, y, w, h)
-          // 绘制标注
           drawAnnotations(canvas, image, imgInfo.annotations || [], {
             showBox: this.showAnnotations,
-            showLabel: this.showClassLabel,
-            autoSize: false
+            showLabel: this.showClassLabel
           })
         }
         image.src = this.fullUrl(imgInfo.url)
       })
+    },
+
+    // 新增类别占位方法
+    addClass() {
+      if (!this.newClassName.trim()) return
+      console.log('新增类别：', this.newClassName)
+      // 后端新增类别接口
+      this.newClassName = ''
     },
 
     doExport() {
@@ -425,7 +554,7 @@ export default {
 .page-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
+  align-items: flex-start;
   max-width: 1240px;
   margin: 0 auto 22px;
 }
@@ -435,8 +564,24 @@ export default {
   cursor: pointer;
   margin-bottom: 6px;
 }
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .page-header h1 { margin: 0 0 8px; font-size: 28px; }
+.edit-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  background: #fff;
+  cursor: pointer;
+}
 .meta { margin: 0; color: #7f899b; font-size: 13px; }
+.desc-row {
+  margin-top: 10px;
+  max-width: 700px;
+}
 .dark-button {
   padding: 12px 18px;
   border: 0;
@@ -445,6 +590,32 @@ export default {
   color: #fff;
   font-weight: 700;
   cursor: pointer;
+}
+
+/* Tab导航 */
+.tab-nav {
+  max-width: 1240px;
+  margin: 0 auto 20px;
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #e3e8ef;
+}
+.tab-item {
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  font-size: 15px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.tab-item.active {
+  border-bottom-color: #409eff;
+  color: #409eff;
+  font-weight: bold;
+}
+.tab-content {
+  max-width: 1240px;
+  margin: 0 auto;
 }
 
 /* 顶部工具栏 */
@@ -638,7 +809,7 @@ export default {
   color: #999;
 }
 
-/* ========== 底部分页栏样式 ========== */
+/* 分页栏 */
 .pagination-bar {
   max-width: 1240px;
   margin: 0 auto;
@@ -660,22 +831,74 @@ export default {
   cursor: pointer;
 }
 .page-btn:disabled {
-  color:#ccc;
+  color: #ccc;
   cursor: not-allowed;
 }
 .page-jump-wrap {
-  font-size:14px;
-  color:#333;
-  display:flex;
-  align-items:center;
-  gap:6px;
+  font-size: 14px;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .page-input {
   width: 56px;
   padding: 4px;
-  border:1px solid #ddd;
-  border-radius:4px;
-  text-align:center;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  text-align: center;
+}
+
+/* Classes / Charts 页面样式 */
+.chart-card {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e3e8ef;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+.chart-box {
+  width: 100%;
+  height: 320px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+}
+.class-table-wrap {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e3e8ef;
+  padding: 16px;
+}
+.table-head-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.add-class-row {
+  display: flex;
+  gap: 8px;
+}
+.class-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.class-table th, .class-table td {
+  padding: 10px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+.empty-row {
+  text-align: center;
+  color: #999;
+  padding: 30px 0;
+}
+.chart-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
 }
 
 /* 大图弹窗 */
@@ -775,7 +998,10 @@ export default {
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   }
   .pagination-bar {
-    flex-wrap:wrap;
+    flex-wrap: wrap;
+  }
+  .chart-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
