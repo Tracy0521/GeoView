@@ -8,8 +8,17 @@ import { getBoxColor } from './datasetConstants'
  * @param {HTMLCanvasElement} canvas
  * @param {HTMLImageElement} image
  * @param {Array} annotations - [{ class_id, x, y, w, h }]
+ * @param {Object} opts 可选配置
+ * @param {boolean} [opts.showBox=true] 是否绘制标注框
+ * @param {boolean} [opts.showLabel=true] 是否绘制类别文字标签
  */
-export function drawAnnotations(canvas, image, annotations = []) {
+export function drawAnnotations(canvas, image, annotations = [], opts = {}) {
+  // 默认配置
+  const {
+    showBox = true,
+    showLabel = true
+  } = opts
+
   const ctx = canvas.getContext('2d')
   const w = image.naturalWidth || image.width
   const h = image.naturalHeight || image.height
@@ -25,17 +34,23 @@ export function drawAnnotations(canvas, image, annotations = []) {
     const by = ann.y * h - bh / 2
     const color = getBoxColor(ann.class_id)
 
-    ctx.strokeStyle = color
-    ctx.lineWidth = Math.max(2, w / 400)
-    ctx.strokeRect(bx, by, bw, bh)
+    // 绘制方框
+    if (showBox) {
+      ctx.strokeStyle = color
+      ctx.lineWidth = Math.max(2, w / 400)
+      ctx.strokeRect(bx, by, bw, bh)
+    }
 
-    const label = `#${ann.class_id}`
-    ctx.font = `bold ${Math.max(11, w / 50)}px Microsoft YaHei, sans-serif`
-    const tw = ctx.measureText(label).width + 8
-    const th = Math.max(16, w / 45)
-    ctx.fillStyle = color
-    ctx.fillRect(bx, Math.max(0, by - th), tw, th)
-    ctx.fillStyle = '#fff'
-    ctx.fillText(label, bx + 4, Math.max(12, by - 4))
+    // 绘制标签文字
+    if (showLabel) {
+      const label = `#${ann.class_id}`
+      ctx.font = `bold ${Math.max(11, w / 50)}px Microsoft YaHei, sans-serif`
+      const tw = ctx.measureText(label).width + 8
+      const th = Math.max(16, w / 45)
+      ctx.fillStyle = color
+      ctx.fillRect(bx, Math.max(0, by - th), tw, th)
+      ctx.fillStyle = '#fff'
+      ctx.fillText(label, bx + 4, Math.max(12, by - 4))
+    }
   })
 }

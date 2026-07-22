@@ -12,42 +12,157 @@
       <button class="dark-button" @click="doExport">导出 YOLO</button>
     </header>
 
-    <div class="workspace">
-      <aside class="image-panel">
-        <el-input v-model="keyword" clearable placeholder="搜索文件名…" />
-        <!-- 绑定滚动监听，触底加载下一页 -->
-        <div class="image-list" @scroll="onImageScroll">
-          <button
-              v-for="img in filteredImages"
-              :key="img.id"
-              type="button"
-              class="image-item"
-              :class="{ active: selectedImage?.id === img.id }"
-              @click="selectImage(img)"
-          >
-            <img :src="fullUrl(img.url)" :alt="img.filename" loading="lazy">
-            <span class="item-info">
-              <strong>{{ img.filename }}</strong>
-              <small>
-                {{ img.box_count }} 框
-                <template v-if="img.split && img.split !== 'unset'"> · {{ img.split === 'train' ? '训练' : '验证' }}</template>
-              </small>
-            </span>
-          </button>
-          <div v-if="loading" class="load-tip">加载中……</div>
-          <div v-if="!hasMore && imageList.length > 0" class="load-tip">已加载全部影像</div>
-        </div>
-      </aside>
+    <!-- 顶部工具栏（参考Ultralytics） -->
+    <div class="toolbar">
+      <el-input v-model="keyword" clearable placeholder="搜索文件名…" class="search-input" @input="onSearchChange"/>
 
-      <section v-if="selectedImage" class="viewer-panel">
-        <div class="viewer-toolbar">
+      <div class="toolbar-right">
+        <!-- 显隐控制按钮 -->
+        <div class="dropdown-wrap">
+          <button class="tool-btn" @click="visiblePopover = !visiblePopover">
+            <span>👁</span>
+          </button>
+          <div v-if="visiblePopover" class="dropdown-menu visible-menu">
+            <div class="menu-title">Visibility</div>
+            <label class="menu-item">
+              <input type="checkbox" v-model="showAnnotations"> Annotations
+            </label>
+            <label class="menu-item">
+              <input type="checkbox" v-model="showClassLabel"> Class labels
+            </label>
+          </div>
+        </div>
+
+        <!-- 视图模式切换 -->
+        <div class="view-switch">
+          <button
+              v-for="mode in viewModeList"
+              :key="mode.value"
+              class="tool-btn"
+              :class="{ active: viewMode === mode.value }"
+              @click="viewMode = mode.value"
+              :title="mode.label"
+          >
+            {{ mode.icon }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 图片主区域 -->
+    <div class="image-container">
+      <!-- Grid 网格视图 -->
+      <div v-if="viewMode === 'grid'" class="grid-view">
+        <div
+            v-for="img in pageImages"
+            :key="img.id"
+            class="grid-card"
+            :class="{ active: selectedImage?.id === img.id }"
+            @click="openImageViewer(img)"
+        >
+          <div class="preview-box">
+            <canvas
+                ref="gridCanvas"
+                class="grid-canvas"
+                :data-img-id="img.id"
+            ></canvas>
+          </div>
+          <div class="card-footer">
+            <div class="filename">{{ img.filename }}</div>
+            <div class="info-text">{{ img.box_count }} 框</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Compact 紧凑列表 -->
+      <div v-if="viewMode === 'compact'" class="compact-view">
+        <div
+            v-for="img in pageImages"
+            :key="img.id"
+            class="compact-item"
+            :class="{ active: selectedImage?.id === img.id }"
+            @click="openImageViewer(img)"
+        >
+          <div class="thumb-wrap">
+            <canvas class="compact-canvas" :data-img-id="img.id"></canvas>
+          </div>
+          <div class="compact-text">
+            <div class="filename">{{ img.filename }}</div>
+            <div class="info-text">
+              {{ img.box_count }} 标注框
+              <template v-if="img.split && img.split !== 'unset'">
+                · {{ img.split === 'train' ? '训练集' : '验证集' }}
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Table 表格视图 -->
+      <div v-if="viewMode === 'table'" class="table-view">
+        <table>
+          <thead>
+          <tr>
+            <th>预览</th>
+            <th>文件名</th>
+            <th>标注数量</th>
+            <th>数据集划分</th>
+          </tr>
+          </thead>
+          <tbody>
+          <tr
+              v-for="img in pageImages"
+              :key="img.id"
+              :class="{ active: selectedImage?.id === img.id }"
+              @click="openImageViewer(img)"
+          >
+            <td>
+              <div class="table-thumb">
+                <canvas class="table-canvas" :data-img-id="img.id"></canvas>
+              </div>
+            </td>
+            <td>{{ img.filename }}</td>
+            <td>{{ img.box_count }}</td>
+            <td>{{ getSplitName(img.split) }}</td>
+          </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-if="loading" class="load-tip">加载中……</div>
+      <div v-if="pageImages.length === 0 && !loading" class="empty-tip">暂无影像数据</div>
+    </div>
+
+    <!-- ========== 新增底部分页控件 ========== -->
+    <div class="pagination-bar" v-if="total > 0">
+      <span class="page-info">共 {{ total }} 条</span>
+      <button class="page-btn" :disabled="currentPage <=1" @click="changePage(currentPage -1)">上一页</button>
+
+      <span class="page-jump-wrap">
+        第
+        <input
+            class="page-input"
+            v-model.number="jumpPageNum"
+            @keyup.enter="handleJumpPage"
+        />
+        / {{ maxPage }} 页
+      </span>
+
+      <button class="page-btn" :disabled="currentPage >= maxPage" @click="changePage(currentPage +1)">下一页</button>
+    </div>
+
+    <!-- 大图查看弹窗 -->
+    <div v-if="selectedImage" class="image-modal" @click.self="closeViewer">
+      <div class="modal-inner">
+        <div class="modal-header">
           <strong>{{ selectedImage.filename }}</strong>
           <span>{{ selectedImage.box_count }} 个标注框</span>
           <span v-if="selectedImage.split && selectedImage.split !== 'unset'" class="split-tag">
-            {{ selectedImage.split === 'train' ? '训练集' : '验证集' }}
+            {{ getSplitName(selectedImage.split) }}
           </span>
+          <button class="close-btn" @click="closeViewer">✕</button>
         </div>
-        <div class="canvas-wrap">
+        <div class="modal-canvas-wrap">
           <canvas ref="viewerCanvas" class="viewer-canvas" />
         </div>
         <div v-if="selectedImage.annotations?.length" class="annotation-table">
@@ -67,10 +182,8 @@
         <div v-if="selectedImage.warnings?.length" class="warnings">
           <div v-for="(w, i) in selectedImage.warnings" :key="i">{{ w }}</div>
         </div>
-      </section>
+      </div>
     </div>
-
-    <div v-if="imageList.length === 0 && !loading" class="empty-state">该数据集暂无影像，请返回列表上传文件。</div>
   </main>
 </template>
 
@@ -88,30 +201,62 @@ export default {
       keyword: '',
       selectedImage: null,
 
-      // 分页控制
-      imageList: [],
-      page: 1,
-      pageSize: 16,
-      hasMore: true,
-      loading: false
+      // 视图控制
+      viewMode: 'grid',
+      viewModeList: [
+        { icon: '▦', value: 'grid', label: '网格视图' },
+        { icon: '☰', value: 'compact', label: '紧凑列表' },
+        { icon: '▤', value: 'table', label: '表格视图' }
+      ],
+      visiblePopover: false,
+      showAnnotations: true,
+      showClassLabel: true,
+
+      // ========== 传统分页配置（移除无限滚动）==========
+      pageSize: 20,
+      currentPage: 1,
+      total: 0,
+      maxPage: 1,
+      jumpPageNum: 1,
+      loading: false,
+      _pageData: []
     }
   },
   computed: {
-    filteredImages() {
-      const images = this.imageList
+    // 前端搜索过滤当前页数据
+    pageImages() {
       const key = this.keyword.trim().toLowerCase()
-      if (!key) return images
-      return images.filter(img => img.filename.toLowerCase().includes(key))
+      if (!key) return this._pageData
+      return this._pageData.filter(img => img.filename.toLowerCase().includes(key))
     }
   },
   watch: {
     '$route.params.id': {
       immediate: true,
       handler() {
-        this.resetPagination()
+        this.resetPage()
         this.loadDatasetBase()
       }
+    },
+    // 切换显隐选项，重绘所有缩略图
+    showAnnotations() {
+      this.$nextTick(() => this.redrawAllThumb())
+    },
+    showClassLabel() {
+      this.$nextTick(() => this.redrawAllThumb())
+    },
+    viewMode() {
+      this.$nextTick(() => this.redrawAllThumb())
+    },
+    currentPage(newVal) {
+      this.jumpPageNum = newVal
     }
+  },
+  mounted() {
+    document.addEventListener('click', this.handleDocumentClick)
+  },
+  beforeUnmount() {
+    document.removeEventListener('click', this.handleDocumentClick)
   },
   methods: {
     getBoxColor,
@@ -128,13 +273,28 @@ export default {
       const group = getCategoryGroup(classId)
       return CATEGORY_GROUPS[group]?.label || '未知'
     },
+    getSplitName(split) {
+      if (split === 'train') return '训练集'
+      if (split === 'val') return '验证集'
+      return '未划分'
+    },
+    handleDocumentClick(e) {
+      if (!e.target.closest('.dropdown-wrap')) {
+        this.visiblePopover = false
+      }
+    },
+    onSearchChange() {
+      // 搜索重置回第一页
+      this.currentPage = 1
+      this.loadImagePage()
+    },
 
     // 重置分页状态（切换数据集时调用）
-    resetPagination() {
-      this.imageList = []
-      this.page = 1
-      this.hasMore = true
-      this.loading = false
+    resetPage() {
+      this.currentPage = 1
+      this.total = 0
+      this.maxPage = 1
+      this.jumpPageNum = 1
       this.selectedImage = null
     },
 
@@ -150,62 +310,102 @@ export default {
       }
     },
 
-    // 加载图片分页
+    // 加载指定页码数据
     async loadImagePage() {
-      if (this.loading || !this.hasMore) return
+      if (this.loading) return
       this.loading = true
       try {
         const res = await getDataset(this.$route.params.id, {
-          page: this.page,
+          page: this.currentPage,
           limit: this.pageSize
         })
         const data = res.data.data
-        const newImgs = data.images || []
+        this._pageData = data.images || []
+        this.total = data.pagination?.total || 0
+        this.maxPage = Math.ceil(this.total / this.pageSize) || 1
 
-        if (this.page === 1) {
-          this.imageList = newImgs
-          if (newImgs.length > 0) {
-            this.selectedImage = newImgs[0]
-            this.$nextTick(() => this.renderSelected())
-          }
-        } else {
-          this.imageList.push(...newImgs)
-        }
-
-        const total = data.pagination?.total || 0
-        this.hasMore = this.imageList.length < total
-        this.page += 1
+        // 删除默认选中第一张
       } catch (err) {
         console.error('分页加载图片失败：', err)
       } finally {
         this.loading = false
+        this.$nextTick(() => this.redrawAllThumb())
       }
     },
 
-    // 左侧滚动到底部触发加载
-    onImageScroll(e) {
-      const dom = e.target
-      const reachBottom = dom.scrollTop + dom.clientHeight >= dom.scrollHeight - 80
-      if (reachBottom) {
-        this.loadImagePage()
-      }
+    // 切换页码
+    changePage(page) {
+      if (page < 1 || page > this.maxPage || page === this.currentPage) return
+      this.currentPage = page
+      this.loadImagePage()
     },
 
-    selectImage(img) {
+    // 输入框跳转页码
+    handleJumpPage() {
+      let num = Number(this.jumpPageNum)
+      if (isNaN(num)) num = this.currentPage
+      num = Math.max(1, Math.min(num, this.maxPage))
+      this.jumpPageNum = num
+      this.changePage(num)
+    },
+
+    // 打开大图弹窗
+    openImageViewer(img) {
       this.selectedImage = img
-      this.$nextTick(() => this.renderSelected())
+      this.$nextTick(() => this.renderSelectedBig())
     },
-    renderSelected() {
+    closeViewer() {
+      this.selectedImage = null
+    },
+
+    // 绘制大图弹窗（携带显隐参数）
+    renderSelectedBig() {
       if (!this.selectedImage) return
       const canvas = this.$refs.viewerCanvas
       if (!canvas) return
       const img = new Image()
       img.crossOrigin = 'anonymous'
       img.onload = () => {
-        drawAnnotations(canvas, img, this.selectedImage.annotations || [])
+        drawAnnotations(canvas, img, this.selectedImage.annotations || [], {
+          showBox: this.showAnnotations,
+          showLabel: this.showClassLabel
+        })
       }
       img.src = this.fullUrl(this.selectedImage.url)
     },
+
+    // 批量重绘所有缩略图
+    redrawAllThumb() {
+      const canvasList = document.querySelectorAll('[data-img-id]')
+      canvasList.forEach(canvas => {
+        const imgId = canvas.getAttribute('data-img-id')
+        const imgInfo = this._pageData.find(i => i.id === imgId)
+        if (!imgInfo) return
+        const image = new Image()
+        image.crossOrigin = 'anonymous'
+        image.onload = () => {
+          const ctx = canvas.getContext('2d')
+          canvas.width = canvas.offsetWidth
+          canvas.height = canvas.offsetHeight
+          ctx.clearRect(0, 0, canvas.width, canvas.height)
+          // 等比绘制原图
+          const scale = Math.min(canvas.width / image.width, canvas.height / image.height)
+          const w = image.width * scale
+          const h = image.height * scale
+          const x = (canvas.width - w) / 2
+          const y = (canvas.height - h) / 2
+          ctx.drawImage(image, x, y, w, h)
+          // 绘制标注
+          drawAnnotations(canvas, image, imgInfo.annotations || [], {
+            showBox: this.showAnnotations,
+            showLabel: this.showClassLabel,
+            autoSize: false
+          })
+        }
+        image.src = this.fullUrl(imgInfo.url)
+      })
+    },
+
     doExport() {
       window.open(exportDatasetUrl(this.dataset.id), '_blank')
     }
@@ -226,7 +426,7 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  max-width: 1180px;
+  max-width: 1240px;
   margin: 0 auto 22px;
 }
 .back {
@@ -247,79 +447,283 @@ export default {
   cursor: pointer;
 }
 
-.workspace {
-  display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  gap: 18px;
-  max-width: 1180px;
-  margin: 0 auto;
-}
-.image-panel,
-.viewer-panel {
-  border: 1px solid #e3e8ef;
-  border-radius: 14px;
-  background: #fff;
-  box-shadow: 0 4px 16px rgba(31, 45, 70, .04);
-}
-.image-panel {
-  padding: 14px;
-  align-self: start;
-  max-height: calc(100vh - 180px);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.image-list {
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 1;
-}
-.image-item {
+/* 顶部工具栏 */
+.toolbar {
+  max-width: 1240px;
+  margin: 0 auto 16px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px;
-  border: 1px solid #e8edf3;
-  border-radius: 10px;
-  background: #fafbfd;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.search-input {
+  width: 320px;
+}
+.toolbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tool-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid #e3e8ef;
+  background: #fff;
   cursor: pointer;
-  text-align: left;
+  font-size: 16px;
 }
-.image-item:hover,
-.image-item.active {
+.tool-btn.active {
+  background: #edf4ff;
   border-color: #409eff;
-  background: #f0f7ff;
+  color: #409eff;
 }
-.image-item img {
-  width: 56px;
-  height: 56px;
-  object-fit: cover;
-  border-radius: 6px;
-  flex-shrink: 0;
+
+/* 下拉菜单 */
+.dropdown-wrap {
+  position: relative;
 }
-.item-info { min-width: 0; }
-.item-info strong {
+.dropdown-menu {
+  position: absolute;
+  top: 42px;
+  right: 0;
+  width: 180px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #e3e8ef;
+  border-radius: 10px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.08);
+  z-index: 100;
+}
+.menu-title {
+  font-size: 13px;
+  color: #888;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #f0f2f5;
+}
+.menu-item {
   display: block;
-  font-size: 12px;
+  padding: 6px 4px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* 图片区域 */
+.image-container {
+  max-width: 1240px;
+  margin: 0 auto;
+  min-height: 400px;
+  padding-bottom: 20px;
+}
+
+/* Grid网格视图 */
+.grid-view {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+.grid-card {
+  border: 1px solid #e3e8ef;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+  cursor: pointer;
+}
+.grid-card.active {
+  border-color: #409eff;
+  box-shadow: 0 0 0 2px rgba(64,158,255,0.2);
+}
+.preview-box {
+  width: 100%;
+  height: 160px;
+  background: #f2f6fb;
+}
+.grid-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.card-footer {
+  padding: 10px;
+}
+.filename {
+  font-size: 13px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.item-info small { color: #8c96a7; font-size: 11px; }
+.info-text {
+  font-size: 12px;
+  color: #888;
+  margin-top: 4px;
+}
 
-.viewer-panel { padding: 18px; }
-.viewer-toolbar {
+/* Compact紧凑视图 */
+.compact-view {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
-  font-size: 13px;
-  color: #6b7a8d;
+  flex-direction: column;
+  gap: 10px;
 }
-.viewer-toolbar strong { color: #192234; font-size: 15px; }
+.compact-item {
+  display: flex;
+  gap: 12px;
+  padding: 8px;
+  border: 1px solid #e3e8ef;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  align-items: center;
+}
+.compact-item.active {
+  border-color: #409eff;
+}
+.thumb-wrap {
+  width: 80px;
+  height: 60px;
+  flex-shrink: 0;
+  background: #f2f6fb;
+}
+.compact-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.compact-text {
+  min-width: 0;
+}
+
+/* Table表格视图 */
+.table-view {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e3e8ef;
+  overflow: hidden;
+}
+.table-view table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.table-view th,
+.table-view td {
+  padding: 12px 14px;
+  text-align: left;
+  border-bottom: 1px solid #f0f2f5;
+  font-size: 14px;
+}
+.table-view th {
+  background: #f8fafc;
+}
+.table-view tbody tr {
+  cursor: pointer;
+}
+.table-view tbody tr.active {
+  background: #f0f7ff;
+}
+.table-thumb {
+  width: 80px;
+  height: 50px;
+  background: #f2f6fb;
+}
+.table-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.load-tip, .empty-tip {
+  padding: 40px 0;
+  text-align: center;
+  color: #999;
+}
+
+/* ========== 底部分页栏样式 ========== */
+.pagination-bar {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 16px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+.page-info {
+  color: #666;
+  font-size: 14px;
+}
+.page-btn {
+  padding: 6px 14px;
+  border: 1px solid #e3e8ef;
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.page-btn:disabled {
+  color:#ccc;
+  cursor: not-allowed;
+}
+.page-jump-wrap {
+  font-size:14px;
+  color:#333;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.page-input {
+  width: 56px;
+  padding: 4px;
+  border:1px solid #ddd;
+  border-radius:4px;
+  text-align:center;
+}
+
+/* 大图弹窗 */
+.image-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  padding: 20px;
+}
+.modal-inner {
+  width: min(1100px, 100%);
+  max-height: 92vh;
+  background: #fff;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #eee;
+}
+.close-btn {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  cursor: pointer;
+}
+.modal-canvas-wrap {
+  flex: 1;
+  overflow: auto;
+  background: #f2f6fb;
+  padding: 16px;
+  text-align: center;
+}
+.viewer-canvas {
+  max-width: 100%;
+  height: auto;
+  display: inline-block;
+}
 .split-tag {
   padding: 2px 8px;
   border-radius: 999px;
@@ -327,40 +731,24 @@ export default {
   color: #409eff;
   font-size: 12px;
 }
-.canvas-wrap {
-  border: 1px solid #edf0f5;
-  border-radius: 10px;
-  background: #f2f6fb;
-  overflow: auto;
-  max-height: 62vh;
-}
-.viewer-canvas {
-  display: block;
-  max-width: 100%;
-  height: auto;
-}
 
 .annotation-table {
-  margin-top: 16px;
-  border: 1px solid #edf0f5;
-  border-radius: 10px;
-  overflow: hidden;
+  padding: 16px 20px;
+  border-top: 1px solid #eee;
+  max-height: 260px;
+  overflow-y: auto;
 }
 .table-head {
-  padding: 10px 14px;
-  background: #f8fafc;
-  font-size: 13px;
-  font-weight: 700;
+  padding-bottom: 10px;
+  font-weight: bold;
 }
 .ann-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px 16px;
-  padding: 8px 14px;
-  border-top: 1px solid #edf0f5;
-  font-size: 12px;
-  color: #5a6478;
+  padding: 8px 0;
+  font-size: 13px;
 }
 .ann-row i {
   width: 10px;
@@ -369,7 +757,7 @@ export default {
 }
 
 .warnings {
-  margin-top: 12px;
+  margin: 0 20px 16px;
   padding: 10px 14px;
   border-radius: 8px;
   background: #fff7e6;
@@ -377,28 +765,17 @@ export default {
   font-size: 12px;
 }
 
-.empty-state {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 48px;
-  text-align: center;
-  color: #9aa3b1;
-  background: #fff;
-  border-radius: 14px;
-  border: 1px solid #e3e8ef;
-}
-
-.load-tip {
-  padding: 12px 0;
-  text-align: center;
-  font-size: 12px;
-  color: #888;
-}
-
 @media (max-width: 900px) {
   .detail-page { padding: 20px 16px; }
   .page-header { flex-direction: column; align-items: flex-start; gap: 14px; }
-  .workspace { grid-template-columns: 1fr; }
-  .image-panel { max-height: 280px; }
+  .toolbar { flex-direction: column; align-items: flex-start; }
+  .search-input { width: 100%; }
+  .toolbar-right { margin-left: unset; }
+  .grid-view {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+  .pagination-bar {
+    flex-wrap:wrap;
+  }
 }
 </style>
