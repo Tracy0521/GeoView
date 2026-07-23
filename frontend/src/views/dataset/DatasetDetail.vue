@@ -187,7 +187,7 @@
                   <span>{{ getSortArrow('box_count') }}</span>
                 </button>
               </th>
-              <th>Classes</th>
+              <th style="min-width: 240px;">Classes</th>
             </tr>
             </thead>
             <tbody>
@@ -203,24 +203,29 @@
                 </div>
               </td>
               <td>{{ img.filename }}</td>
-              <td>{{ img.height }}</td>
-              <td>{{ img.width }}</td>
-              <td>{{ formatFileSize(img.size) }}</td>
+              <td>{{ img.height != null ? img.height : '-' }}</td>
+              <td>{{ img.width != null ? img.width : '-' }}</td>
+              <td>{{ img.size != null ? formatFileSize(img.size) : '-' }}</td>
               <td>
-        <span class="split-tag-table" :class="splitClass(img.split)">
-          {{ getSplitName(img.split) }}
-        </span>
+                <!-- 【修复】class绑定在外层split-row -->
+                <span class="split-row" :class="splitClass(img.split)">
+      <span class="split-dot"></span>
+      <span class="split-text">{{ getSplitName(img.split) }}</span>
+    </span>
               </td>
               <td>{{ img.box_count }}</td>
-              <td class="classes-cell">
-        <span
-            v-for="cls in img.class_list"
-            :key="cls.class_id"
-            class="class-tag"
-        >
-          <span class="color-dot-small" :style="{background:getClassColor(cls.class_id)}"></span>
-          {{ cls.name }}<sup>{{ cls.count }}</sup>
-        </span>
+              <td>
+    <span class="classes-cell">
+      <span
+          v-for="cls in img.class_list"
+          :key="cls.class_id"
+          class="class-tag"
+      >
+        <span class="color-dot-small" :style="{background:getClassColor(cls.class_id)}"></span>
+        {{ cls.name }}<sup>{{ cls.count }}</sup>
+      </span>
+    </span>
+                <span v-if="!img.class_list || img.class_list.length === 0">-</span>
               </td>
             </tr>
             </tbody>
@@ -237,14 +242,14 @@
         <button class="page-btn" :disabled="currentPage <=1" @click="changePage(currentPage -1)">上一页</button>
 
         <span class="page-jump-wrap">
-          第
-          <input
-              class="page-input"
-              v-model.number="jumpPageNum"
-              @keyup.enter="handleJumpPage"
-          />
-          / {{ maxPage }} 页
-        </span>
+    第
+    <input
+        class="page-input"
+        v-model.number="jumpPageNum"
+        @keyup.enter="handleJumpPage"
+    />
+    / {{ maxPage }} 页
+  </span>
 
         <button class="page-btn" :disabled="currentPage >= maxPage" @click="changePage(currentPage +1)">下一页</button>
       </div>
@@ -464,10 +469,10 @@ export default {
     }
   },
   computed: {
+    // 删除原来的 pageImages(){}
     pageImages() {
-      const key = this.keyword.trim().toLowerCase()
-      if (!key) return this._pageData
-      return this._pageData.filter(img => img.filename.toLowerCase().includes(key))
+      // 直接使用后端返回的全部当前分页数据，不再前端过滤
+      return this._pageData
     },
     sortedClassList() {
       const arr = [...this.classList]
@@ -583,9 +588,10 @@ export default {
       return CATEGORY_GROUPS[group]?.label || '未知'
     },
     getSplitName(split) {
-      if (split === 'train') return '训练集'
-      if (split === 'val') return '验证集'
-      return '未划分'
+      if (split === 'train') return 'Train'
+      if (split === 'val') return 'Val'
+      if (split === 'test') return 'Test'
+      return 'Unset'
     },
     handleDocumentClick(e) {
       if (!e.target.closest('.dropdown-wrap')) {
@@ -677,9 +683,11 @@ export default {
       if (this.loading) return
       this.loading = true
       try {
+        // 追加 keyword 传给后端
         const res = await getDataset(this.$route.params.id, {
           page: this.currentPage,
-          limit: this.pageSize
+          limit: this.pageSize,
+          keyword: this.keyword.trim()   // ✅新增
         })
         const data = res.data.data
         this._pageData = data.images || []
@@ -1207,9 +1215,11 @@ export default {
   color: #409eff;
 }
 .classes-cell {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
   gap: 6px 8px;
+  align-items: center;
+  vertical-align: middle;
 }
 .class-tag {
   display: inline-flex;
@@ -1222,23 +1232,29 @@ export default {
   height:10px;
   border-radius:50%;
 }
-.split-tag-table {
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size:13px;
-  display: inline-block; /* 保证标签自身对齐稳定 */
+.split-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  vertical-align: middle;
 }
-.split-train {
-  background:#dcf7dd;
-  color:#238529;
+.split-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  flex-shrink: 0;
 }
-.split-val {
-  background:#e0edff;
-  color:#245fc9;
+.split-text {
+  font-size: 14px;
 }
-.split-test {
-  background:#f3e8ff;
-  color:#873fc2;
+.split-train .split-dot {
+  background-color: #22c55e;
+}
+.split-val .split-dot {
+  background-color: #3b82f6;
+}
+.split-test .split-dot {
+  background-color: #a855f7;
 }
 
 /* 分页栏 */

@@ -254,11 +254,11 @@ def _sync_dataset_stat(ds_model: Dataset):
 
 
 def _build_image_dict(img_model: DatasetImage):
-    """数据库模型 → 前端JSON结构，携带image_info影像元信息"""
+    """数据库模型 → 前端JSON结构，携带image_info影像元信息 + 新增class_list用于表格"""
     ann_models = DatasetAnnotation.query.filter_by(image_id=img_model.id).all()
     ann_list = []
 
-    # =====新增：一次性加载当前数据集全部类别映射 class_id -> name=====
+    # =====一次性加载当前数据集全部类别映射 class_id -> name=====
     from applications.models.dataset_model import DatasetClass
     class_map = {}
     cls_rows = DatasetClass.query.filter_by(dataset_id=img_model.dataset_id).all()
@@ -266,19 +266,38 @@ def _build_image_dict(img_model: DatasetImage):
         class_map[row.class_id] = row.name
     # =====================================================
 
+    # 统计单张图片内各类别数量（构造class_list）
+    class_counter = {}
     for ann in ann_models:
         real_name = class_map.get(ann.class_id, f"class_{ann.class_id}")
         ann_list.append({
             "class_id": ann.class_id,
             "category": ann.category,
-            "class_name": real_name,   # <---新增字段，真实类别名：A16_FA-18
+            "class_name": real_name,
             "x": ann.x,
             "y": ann.y,
             "w": ann.w,
             "h": ann.h
         })
+        # 统计计数
+        if ann.class_id not in class_counter:
+            class_counter[ann.class_id] = 0
+        class_counter[ann.class_id] += 1
+
+    # 组装表格需要的 class_list
+    class_list = []
+    for cid, cnt in class_counter.items():
+        class_list.append({
+            "class_id": cid,
+            "name": class_map.get(cid, f"class_{cid}"),
+            "count": cnt
+        })
+
     # 读取一对一影像信息
     info_data = None
+    width = None
+    height = None
+    file_size = None
     if img_model.image_info:
         info_data = {
             "width": img_model.image_info.width,
@@ -289,6 +308,11 @@ def _build_image_dict(img_model: DatasetImage):
             "projection": img_model.image_info.projection,
             "extra_meta": img_model.image_info.extra_meta
         }
+        # 把宽高、文件尺寸提取到顶层，适配前端表格直接访问 img.width
+        width = img_model.image_info.width
+        height = img_model.image_info.height
+        file_size = img_model.image_info.file_size
+
     return {
         "id": img_model.id,
         "filename": img_model.filename,
@@ -298,7 +322,12 @@ def _build_image_dict(img_model: DatasetImage):
         "box_count": len(ann_list),
         "split": img_model.split,
         "warnings": img_model.warnings.split("||") if img_model.warnings else [],
-        "image_info": info_data
+        "image_info": info_data,
+        # ==========新增平铺字段【前端表格立刻生效】==========
+        "width": width,
+        "height": height,
+        "size": file_size,
+        "class_list": class_list
     }
 
 
@@ -719,7 +748,6 @@ def dataset_detail(dataset_id):
     if not ds:
         return fail_api('数据集不存在')
 
-    # page=0 && limit=0：只返回数据集基础信息，不查询图片
     if page == 0 and limit == 0:
         resp = {
             "id": ds.id,
@@ -734,7 +762,6 @@ def dataset_detail(dataset_id):
         }
         return success_api(data=resp)
 
-    # 分页查询影像
     img_query = DatasetImage.query.filter_by(dataset_id=dataset_id).order_by(DatasetImage.id.desc())
     total = img_query.count()
     imgs = img_query.limit(limit).offset((page - 1) * limit).all()
@@ -778,8 +805,23 @@ def dataset_delete(dataset_id):
     ds = Dataset.query.get(dataset_id)
     if not ds:
         return fail_api('数据集不存在')
+
+    # 1. 删除标注
+    img_ids = [img.id for img in DatasetImage.query.filter_by(dataset_id=dataset_id).all()]
+    if img_ids:
+        DatasetAnnotation.query.filter(DatasetAnnotation.image_id.in_(img_ids)).delete()
+    # 2. 删除影像元信息
+    ImageInfo.query.filter(ImageInfo.image_id.in_(img_ids)).delete()
+    # 3. 删除影像记录
+    DatasetImage.query.filter_by(dataset_id=dataset_id).delete()
+    # 4. 删除类别
+    DatasetClass.query.filter_by(dataset_id=dataset_id).delete()
+
+    # 5. 删除数据集主记录
     db.session.delete(ds)
     db.session.commit()
+
+    # 删除磁盘文件
     dir_path = _dataset_dir(dataset_id)
     if os.path.exists(dir_path):
         shutil.rmtree(dir_path)
