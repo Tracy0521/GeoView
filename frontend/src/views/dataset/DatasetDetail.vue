@@ -533,6 +533,13 @@ export default {
     activeTab(newTab) {
       this.selectedImage = null
       this.destroyAllCharts()
+      if (newTab === 'images') {
+        // 不要立刻绘图，等待DOM渲染完毕
+        this.$nextTick(()=>{
+          // 等DOM渲染完再重绘
+          this.redrawAllThumb()
+        })
+      }
       if (newTab === 'classes') {
         this.loadClassData().then(() => {
           setTimeout(() => {
