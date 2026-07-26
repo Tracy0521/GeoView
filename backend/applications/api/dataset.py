@@ -1040,16 +1040,33 @@ def dataset_export(dataset_id):
 # ============ 新增类别相关接口 ============
 @dataset_api.get("/<dataset_id>/classes")
 def get_dataset_classes(dataset_id):
+    from sqlalchemy import func, distinct
     ds = Dataset.query.get(dataset_id)
     if not ds:
         return fail_api("数据集不存在")
-    rows = DatasetClass.query.filter_by(dataset_id=dataset_id).order_by(DatasetClass.class_id).all()
+
+    # 实时聚合：每个类别标注总数 + 不重复影像数量
+    stat_query = db.session.query(
+        DatasetAnnotation.class_id,
+        func.count(DatasetAnnotation.id).label("ann_cnt"),
+        func.count(distinct(DatasetAnnotation.image_id)).label("img_cnt")
+    ).join(DatasetImage) \
+        .filter(DatasetImage.dataset_id == dataset_id) \
+        .group_by(DatasetAnnotation.class_id).all()
+
+    stat_map = {}
+    for cid, ann_cnt, img_cnt in stat_query:
+        stat_map[cid] = {"ann": ann_cnt, "img": img_cnt}
+
+    class_rows = DatasetClass.query.filter_by(dataset_id=dataset_id).order_by(DatasetClass.class_id).all()
     res = []
-    for r in rows:
+    for r in class_rows:
+        stat = stat_map.get(r.class_id, {"ann": 0, "img": 0})
         res.append({
             "class_id": r.class_id,
             "name": r.name,
-            "annotation_count": r.annotation_count
+            "annotation_count": stat["ann"],
+            "image_count": stat["img"]
         })
     return success_api(data=res)
 
