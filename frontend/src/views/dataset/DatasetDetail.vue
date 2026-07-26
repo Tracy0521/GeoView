@@ -534,11 +534,7 @@ export default {
       this.selectedImage = null
       this.destroyAllCharts()
       if (newTab === 'images') {
-        // 不要立刻绘图，等待DOM渲染完毕
-        this.$nextTick(()=>{
-          // 等DOM渲染完再重绘
-          this.redrawAllThumb()
-        })
+        this.loadImagePage()
       }
       if (newTab === 'classes') {
         this.loadClassData().then(() => {
@@ -571,13 +567,6 @@ export default {
     currentPage(newVal) {
       this.jumpPageNum = newVal
     }
-  },
-  mounted() {
-    document.addEventListener('click', this.handleDocumentClick)
-  },
-  beforeUnmount() {
-    document.removeEventListener('click', this.handleDocumentClick)
-    this.destroyAllCharts()
   },
   methods: {
     getBoxColor,
@@ -689,12 +678,12 @@ export default {
     async loadImagePage() {
       if (this.loading) return
       this.loading = true
+      this._pageData = []
       try {
-        // 追加 keyword 传给后端
         const res = await getDataset(this.$route.params.id, {
           page: this.currentPage,
           limit: this.pageSize,
-          keyword: this.keyword.trim()   // ✅新增
+          keyword: this.keyword.trim()
         })
         const data = res.data.data
         this._pageData = data.images || []

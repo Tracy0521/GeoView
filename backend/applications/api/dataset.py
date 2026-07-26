@@ -743,6 +743,8 @@ def dataset_create():
 def dataset_detail(dataset_id):
     page = request.args.get("page", 1, type=int)
     limit = request.args.get("limit", 16, type=int)
+    # =========新增：读取搜索关键词并清理首尾空格=========
+    keyword = request.args.get("keyword", "").strip()
 
     ds = Dataset.query.get(dataset_id)
     if not ds:
@@ -762,7 +764,12 @@ def dataset_detail(dataset_id):
         }
         return success_api(data=resp)
 
-    img_query = DatasetImage.query.filter_by(dataset_id=dataset_id).order_by(DatasetImage.id.desc())
+    img_query = DatasetImage.query.filter_by(dataset_id=dataset_id)
+    # =========新增：关键词不为空时，增加文件名模糊匹配=========
+    if keyword:
+        img_query = img_query.filter(DatasetImage.filename.like(f'%{keyword}%'))
+
+    img_query = img_query.order_by(DatasetImage.id.desc())
     total = img_query.count()
     imgs = img_query.limit(limit).offset((page - 1) * limit).all()
 
