@@ -20,15 +20,29 @@
           {{ dataset.image_count }} 张影像 · {{ dataset.box_count }} 个标注框 ·
           {{ dataset.class_count }} 类 · 更新于 {{ formatTime(dataset.updated_at) }}
         </p>
-        <!-- 数据集简介 -->
+        <!-- 数据集简介【重构区域】 -->
         <div class="desc-row">
+          <!-- 常态展示区域 -->
+          <div
+              v-if="!editDesc"
+              class="desc-view"
+              @click="editDesc = true"
+          >
+            <span v-if="dataset.description" class="desc-text">{{ dataset.description }}</span>
+            <span v-else class="desc-placeholder">添加数据集简介</span>
+            <span class="edit-pencil">✏</span>
+          </div>
+          <!-- 编辑输入框 -->
           <el-input
+              v-else
               v-model="dataset.description"
               type="textarea"
               :rows="2"
               placeholder="添加数据集简介"
               clearable
-              @blur="saveDatasetInfo"
+              @blur="saveDesc"
+              @keyup.enter="saveDesc"
+              ref="descInputRef"
           />
         </div>
       </div>
@@ -141,15 +155,44 @@
           <table>
             <thead>
             <tr>
-              <th>预览</th>
-              <th>文件名</th>
-              <th>标注数量</th>
-              <th>数据集划分</th>
+              <th style="width:80px">Preview</th>
+              <th>
+                <button class="table-sort-btn" @click="sortTable('filename')">
+                  Name
+                  <span>{{ getSortArrow('filename') }}</span>
+                </button>
+              </th>
+              <th>
+                <button class="table-sort-btn" @click="sortTable('height')">
+                  Height
+                  <span>{{ getSortArrow('height') }}</span>
+                </button>
+              </th>
+              <th>
+                <button class="table-sort-btn" @click="sortTable('width')">
+                  Width
+                  <span>{{ getSortArrow('width') }}</span>
+                </button>
+              </th>
+              <th>
+                <button class="table-sort-btn" @click="sortTable('size')">
+                  Size
+                  <span>{{ getSortArrow('size') }}</span>
+                </button>
+              </th>
+              <th>Split</th>
+              <th>
+                <button class="table-sort-btn" @click="sortTable('box_count')">
+                  Annotations
+                  <span>{{ getSortArrow('box_count') }}</span>
+                </button>
+              </th>
+              <th style="min-width: 240px;">Classes</th>
             </tr>
             </thead>
             <tbody>
             <tr
-                v-for="img in pageImages"
+                v-for="img in sortedTableImages"
                 :key="img.id"
                 :class="{ active: selectedImage?.id === img.id }"
                 @click="openImageViewer(img)"
@@ -160,8 +203,30 @@
                 </div>
               </td>
               <td>{{ img.filename }}</td>
+              <td>{{ img.height != null ? img.height : '-' }}</td>
+              <td>{{ img.width != null ? img.width : '-' }}</td>
+              <td>{{ img.size != null ? formatFileSize(img.size) : '-' }}</td>
+              <td>
+                <!-- 【修复】class绑定在外层split-row -->
+                <span class="split-row" :class="splitClass(img.split)">
+      <span class="split-dot"></span>
+      <span class="split-text">{{ getSplitName(img.split) }}</span>
+    </span>
+              </td>
               <td>{{ img.box_count }}</td>
-              <td>{{ getSplitName(img.split) }}</td>
+              <td>
+    <span class="classes-cell">
+      <span
+          v-for="cls in img.class_list"
+          :key="cls.class_id"
+          class="class-tag"
+      >
+        <span class="color-dot-small" :style="{background:getClassColor(cls.class_id)}"></span>
+        {{ cls.name }}<sup>{{ cls.count }}</sup>
+      </span>
+    </span>
+                <span v-if="!img.class_list || img.class_list.length === 0">-</span>
+              </td>
             </tr>
             </tbody>
           </table>
@@ -177,14 +242,14 @@
         <button class="page-btn" :disabled="currentPage <=1" @click="changePage(currentPage -1)">上一页</button>
 
         <span class="page-jump-wrap">
-          第
-          <input
-              class="page-input"
-              v-model.number="jumpPageNum"
-              @keyup.enter="handleJumpPage"
-          />
-          / {{ maxPage }} 页
-        </span>
+    第
+    <input
+        class="page-input"
+        v-model.number="jumpPageNum"
+        @keyup.enter="handleJumpPage"
+    />
+    / {{ maxPage }} 页
+  </span>
 
         <button class="page-btn" :disabled="currentPage >= maxPage" @click="changePage(currentPage +1)">下一页</button>
       </div>
@@ -344,6 +409,8 @@ export default {
       keyword: '',
       selectedImage: null,
       editName: false,
+      // 简介编辑开关【新增】
+      editDesc: false,
 
       // Tab 配置
       activeTab: 'images',
@@ -394,14 +461,18 @@ export default {
         topClassPie: null,
         imageSizeBar: null,
         objPerImgBar: null
-      }
+      },
+
+      // table 排序
+      tableSortField: 'filename',
+      tableSortAsc: true,
     }
   },
   computed: {
+    // 删除原来的 pageImages(){}
     pageImages() {
-      const key = this.keyword.trim().toLowerCase()
-      if (!key) return this._pageData
-      return this._pageData.filter(img => img.filename.toLowerCase().includes(key))
+      // 直接使用后端返回的全部当前分页数据，不再前端过滤
+      return this._pageData
     },
     sortedClassList() {
       const arr = [...this.classList]
@@ -418,7 +489,38 @@ export default {
         return this.sortAsc ? valA - valB : valB - valA
       })
       return arr
-    }
+    },
+
+    sortedTableImages() {
+      const list = [...this.pageImages]
+      list.sort((a,b)=>{
+        let va = a[this.tableSortField]
+        let vb = b[this.tableSortField]
+
+        // 字符串文件名
+        if(this.tableSortField === 'filename'){
+          va = va?.toLowerCase() || ''
+          vb = vb?.toLowerCase() || ''
+          if(va > vb) return this.tableSortAsc ? 1 : -1
+          if(va < vb) return this.tableSortAsc ? -1 : 1
+          return 0
+        }
+        // 数字高度/宽度/标注数
+        if(['height','width','box_count'].includes(this.tableSortField)){
+          va = Number(va || 0)
+          vb = Number(vb || 0)
+          return this.tableSortAsc ? va - vb : vb - va
+        }
+        // 文件大小 bytes
+        if(this.tableSortField === 'size'){
+          va = Number(va || 0)
+          vb = Number(vb || 0)
+          return this.tableSortAsc ? va - vb : vb - va
+        }
+        return 0
+      })
+      return list
+    },
   },
   watch: {
     '$route.params.id': {
@@ -431,6 +533,9 @@ export default {
     activeTab(newTab) {
       this.selectedImage = null
       this.destroyAllCharts()
+      if (newTab === 'images') {
+        this.loadImagePage()
+      }
       if (newTab === 'classes') {
         this.loadClassData().then(() => {
           setTimeout(() => {
@@ -440,6 +545,14 @@ export default {
       }
       if (newTab === 'charts') {
         this.$nextTick(() => this.renderAllCharts())
+      }
+    },
+    // 切换到编辑模式自动聚焦输入框
+    editDesc(newVal) {
+      if(newVal) {
+        this.$nextTick(()=>{
+          this.$refs.descInputRef.focus()
+        })
       }
     },
     showAnnotations() {
@@ -454,13 +567,6 @@ export default {
     currentPage(newVal) {
       this.jumpPageNum = newVal
     }
-  },
-  mounted() {
-    document.addEventListener('click', this.handleDocumentClick)
-  },
-  beforeUnmount() {
-    document.removeEventListener('click', this.handleDocumentClick)
-    this.destroyAllCharts()
   },
   methods: {
     getBoxColor,
@@ -478,9 +584,10 @@ export default {
       return CATEGORY_GROUPS[group]?.label || '未知'
     },
     getSplitName(split) {
-      if (split === 'train') return '训练集'
-      if (split === 'val') return '验证集'
-      return '未划分'
+      if (split === 'train') return 'Train'
+      if (split === 'val') return 'Val'
+      if (split === 'test') return 'Test'
+      return 'Unset'
     },
     handleDocumentClick(e) {
       if (!e.target.closest('.dropdown-wrap')) {
@@ -534,6 +641,11 @@ export default {
       console.log('保存数据集信息', this.dataset.name, this.dataset.description)
       this.editName = false
     },
+    // 保存简介专用方法【新增】
+    saveDesc(){
+      this.editDesc = false
+      this.saveDatasetInfo()
+    },
 
     resetPage() {
       this.currentPage = 1
@@ -546,6 +658,7 @@ export default {
       this.classColorMap = {}
       this.classList = []
       this.totalAnnotationCount = 0
+      this.editDesc = false
     },
 
     // 只加载数据集基础信息
@@ -565,10 +678,12 @@ export default {
     async loadImagePage() {
       if (this.loading) return
       this.loading = true
+      this._pageData = []
       try {
         const res = await getDataset(this.$route.params.id, {
           page: this.currentPage,
-          limit: this.pageSize
+          limit: this.pageSize,
+          keyword: this.keyword.trim()
         })
         const data = res.data.data
         this._pageData = data.images || []
@@ -711,7 +826,8 @@ export default {
       const topList = this.classList.slice(0, 8)
       const formatData = topList.map(item => ({
         name: item.name,
-        value: item.annotation_count
+        value: item.annotation_count,
+        class_id: item.class_id
       }))
       const option = getTopClassPieOption(formatData)
       chartIns.setOption(option)
@@ -744,6 +860,32 @@ export default {
       Object.values(this.charts).forEach(ins => {
         disposeChart(ins)
       })
+    },
+
+    // ========== 表格排序相关 ==========
+    sortTable(field) {
+      if (this.tableSortField === field) {
+        this.tableSortAsc = !this.tableSortAsc
+      } else {
+        this.tableSortField = field
+        this.tableSortAsc = true
+      }
+    },
+    getSortArrow(field) {
+      if (this.tableSortField !== field) return '⇅'
+      return this.tableSortAsc ? '↑' : '↓'
+    },
+    // 文件大小格式化 bytes → KB
+    formatFileSize(bytes) {
+      if (!bytes) return '-'
+      const kb = (bytes / 1024).toFixed(1)
+      return `${kb} KB`
+    },
+    splitClass(split) {
+      if (split === 'train') return 'split-train'
+      if (split === 'val') return 'split-val'
+      if (split === 'test') return 'split-test'
+      return ''
     }
   }
 }
@@ -789,6 +931,41 @@ export default {
   margin-top: 10px;
   max-width: 700px;
 }
+/* ========== 简介视图样式【新增】 ========== */
+.desc-view {
+  position: relative;
+  padding: 0px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+.desc-view:hover {
+  background-color: #efefef;
+}
+/* 正文简介文字样式 */
+.desc-text {
+  color: rgb(127, 137, 155);
+  font-size: 16px;
+  line-height: 1.6;
+}
+/* 空白占位文字 */
+.desc-placeholder {
+  color: #a1a8b3;
+  font-size: 16px;
+}
+.edit-pencil {
+  position: absolute;
+  right: 12px;
+  top: 6px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  font-size: 18px;
+  color: #666;
+}
+.desc-view:hover .edit-pencil {
+  opacity: 0.8;
+}
+/* ======================================= */
 .dark-button {
   padding: 12px 18px;
   border: 0;
@@ -989,6 +1166,8 @@ export default {
   text-align: left;
   border-bottom: 1px solid #f0f2f5;
   font-size: 14px;
+  vertical-align: middle;  /* 新增：垂直居中，解决上下错位 */
+  font-weight: normal;     /* 新增：表头取消默认加粗 */
 }
 .table-view th {
   background: #f8fafc;
@@ -1014,6 +1193,64 @@ export default {
   padding: 40px 0;
   text-align: center;
   color: #999;
+}
+
+.table-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: inherit;
+  padding: 0;       /* 新增：清除按钮默认内边距，防止水平偏移 */
+  margin: 0;
+}
+.table-sort-btn:hover {
+  color: #409eff;
+}
+.classes-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
+  vertical-align: middle;
+}
+.class-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size:13px;
+}
+.color-dot-small {
+  width: 10px;
+  height:10px;
+  border-radius:50%;
+}
+.split-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  vertical-align: middle;
+}
+.split-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.split-text {
+  font-size: 14px;
+}
+.split-train .split-dot {
+  background-color: #22c55e;
+}
+.split-val .split-dot {
+  background-color: #3b82f6;
+}
+.split-test .split-dot {
+  background-color: #a855f7;
 }
 
 /* 分页栏 */
