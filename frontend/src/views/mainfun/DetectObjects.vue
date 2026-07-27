@@ -138,6 +138,21 @@
               <span class="chip-check">✓</span>
               <span><strong>锐化</strong><small>强化目标轮廓</small></span>
             </label>
+            <label class="option-chip">
+              <input ref="gamma" type="checkbox" @change="selectGamma(2)">
+              <span class="chip-check">✓</span>
+              <span><strong>Gamma 校正</strong><small>提亮暗部细节</small></span>
+            </label>
+            <label class="option-chip">
+              <input ref="equalize" type="checkbox" @change="selectEqualize(2)">
+              <span class="chip-check">✓</span>
+              <span><strong>直方图均衡</strong><small>增强全局对比度</small></span>
+            </label>
+            <label class="option-chip option-chip-wide">
+              <input ref="brightness" type="checkbox" @change="selectBrightness(2)">
+              <span class="chip-check">✓</span>
+              <span><strong>亮度与对比度</strong><small>改善偏暗、低反差影像</small></span>
+            </label>
           </div>
         </div>
 
@@ -211,7 +226,7 @@
         <div class="heading-icon preview-icon"><i class="iconfont icon-tupiantianjia" /></div>
         <div>
           <span class="section-index">处理预览</span>
-          <h2>{{ uploadSrc.prehandle===2 ? 'CLAHE' : '锐化' }} 处理效果</h2>
+          <h2>{{ enhancementLabel }}处理效果</h2>
           <p>对比原始影像与预处理影像，点击图片可放大查看</p>
         </div>
       </div>
@@ -221,18 +236,11 @@
             <el-image :src="item" :preview-src-list="[item]" :preview-teleported="true" />
             <div class="preview-caption"><span>原始影像</span><small>ORIGINAL</small></div>
           </div>
-          <div v-if="uploadSrc.prehandle===2 && claheImg[index]" class="preview-item">
-            <el-image :src="claheImg[index]" :preview-src-list="[claheImg[index]]" :preview-teleported="true" />
+          <div v-if="enhancedPreviewImages[index]" class="preview-item">
+            <el-image :src="enhancedPreviewImages[index]" :preview-src-list="[enhancedPreviewImages[index]]" :preview-teleported="true" />
             <div class="preview-caption">
-              <span>CLAHE 处理后</span>
-              <button type="button" @click="downloadimgWithWords(-1,claheImg[index],`CLAHE处理图.png`)"><i class="iconfont icon-xiazai" /></button>
-            </div>
-          </div>
-          <div v-else-if="uploadSrc.prehandle===4 && sharpenImg[index]" class="preview-item">
-            <el-image :src="sharpenImg[index]" :preview-src-list="[sharpenImg[index]]" :preview-teleported="true" />
-            <div class="preview-caption">
-              <span>锐化处理后</span>
-              <button type="button" @click="downloadimgWithWords(-1,sharpenImg[index],`锐化处理图.png`)"><i class="iconfont icon-xiazai" /></button>
+              <span>{{ enhancementLabel }}处理后</span>
+              <button type="button" @click="downloadimgWithWords(-1,enhancedPreviewImages[index],`${enhancementLabel}处理图.png`)"><i class="iconfont icon-xiazai" /></button>
             </div>
           </div>
         </template>
@@ -290,7 +298,10 @@ import {atchDownload, downloadimgWithWords, getImgArrayBuffer} from "@/utils/dow
 import {createSrc, imgUpload,getCustomModel} from "@/api/upload";
 import {historyGetPage} from "@/api/history";
 import {getUploadImg, goCompress, upload} from "@/utils/getUploadImg";
-import {selectClahe, selectFilter, selectSharpen, selectSmooth,} from "@/utils/preHandle";
+import {
+  selectBrightness, selectClahe, selectEqualize, selectFilter,
+  selectGamma, selectSharpen, selectSmooth
+} from "@/utils/preHandle";
 import ImgShow from "@/components/ImgShow";
 import Bottominfor from "@/components/Bottominfor";
 import MyVueCropper from "@/components/MyVueCropper";
@@ -312,6 +323,9 @@ export default {
       canUpload:true,
       claheImg:[],
       sharpenImg:[],
+      gammaImg:[],
+      equalizeImg:[],
+      brightnessImg:[],
       before:[],
       fileimg: "",
       file: {},
@@ -351,6 +365,26 @@ export default {
       immediate:true
     }
   },
+  computed: {
+    enhancedPreviewImages() {
+      return {
+        2: this.claheImg,
+        4: this.sharpenImg,
+        6: this.gammaImg,
+        7: this.equalizeImg,
+        8: this.brightnessImg,
+      }[this.uploadSrc.prehandle] || [];
+    },
+    enhancementLabel() {
+      return {
+        2: "CLAHE ",
+        4: "锐化",
+        6: "Gamma 校正",
+        7: "直方图均衡",
+        8: "亮度对比度增强",
+      }[this.uploadSrc.prehandle] || "图像增强";
+    },
+  },
   created() {
     this.getUploadImg("目标检测");
     this.getCustomModel('object_detection').then((res)=>{
@@ -373,6 +407,9 @@ export default {
     selectFilter,
     selectSmooth,
     selectClahe,
+    selectGamma,
+    selectEqualize,
+    selectBrightness,
     checkUpload() {
       this.isUpload = this.afterImg.length !== 0;
     },
@@ -794,6 +831,7 @@ export default {
 .option-chip > span:last-child small { margin-top: 2px; color: #a0a9b6; font-size: 9px; }
 .option-chip input:checked + .chip-check { border-color: #368beb; color: #fff; background: #368beb; }
 .option-chip:has(input:checked) { border-color: #a8cef8; background: #f3f9ff; }
+.option-chip-wide { grid-column: 1 / -1; }
 
 .model-title { margin-bottom: 12px; }
 .model-list { display: flex; flex-direction: column; gap: 7px; width: 100%; }

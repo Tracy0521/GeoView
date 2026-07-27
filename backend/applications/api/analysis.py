@@ -1,7 +1,8 @@
 from flask import Blueprint, request
 
 from applications.common.path_global import (
-    fun_type_2, fun_type_3, fun_type_4, fun_type_5, generate_dir, up_dir
+    fun_type_2, fun_type_3, fun_type_4, fun_type_5, fun_type_6, fun_type_7,
+    fun_type_8, generate_dir, up_dir
 )
 from applications.common.utils.http import fail_api, success_api
 from applications.interface.analysis import object_detection
@@ -22,7 +23,9 @@ def object_detection_api():
     image_list = req_json.get('list')
     prehandle = req_json.get('prehandle')
     denoise = req_json.get('denoise')
-    if prehandle not in (0, fun_type_2, fun_type_4) or denoise not in (
+    if prehandle not in (
+            0, fun_type_2, fun_type_4, fun_type_6, fun_type_7,
+            fun_type_8) or denoise not in (
             0, fun_type_3, fun_type_5):
         return fail_api('参数异常')
     if not image_list:
@@ -40,7 +43,8 @@ def image_pre():
     prehandle = req_json.get('prehandle')
     if not image_list:
         return fail_api('请上传图片')
-    if prehandle not in (fun_type_2, fun_type_4):
+    if prehandle not in (
+            fun_type_2, fun_type_4, fun_type_6, fun_type_7, fun_type_8):
         return fail_api('参数异常')
 
     from applications.common.path_global import generate_url

@@ -6,6 +6,9 @@ from applications.image_processing.gaussian_blur import gaussian_blur
 from applications.image_processing.median_blur import median_blur
 from applications.image_processing.resize import resize
 from applications.image_processing.sharpen import sharpen
+from applications.image_processing.enhance import (
+    brightness_contrast, gamma_correction, histogram_equalization
+)
 from applications.interface import object_detection as detection
 from applications.models.analysis import Analysis
 
@@ -42,5 +45,8 @@ def handle(fun_type, images, src_dir, save_dir):
         3: median_blur,
         4: sharpen,
         5: gaussian_blur,
+        6: gamma_correction,
+        7: histogram_equalization,
+        8: brightness_contrast,
     }
     return processors[fun_type](src_dir, save_dir, images)

@@ -19,7 +19,8 @@ from flask import Blueprint, current_app, request, send_file, send_from_director
 from werkzeug.utils import secure_filename
 
 from applications.common.path_global import (
-    fun_type_2, fun_type_3, fun_type_4, fun_type_5, generate_dir, up_dir
+    fun_type_2, fun_type_3, fun_type_4, fun_type_5, fun_type_6, fun_type_7,
+    fun_type_8, generate_dir, up_dir
 )
 from applications.common.utils.http import fail_api, success_api
 from applications.extensions import db
@@ -932,7 +933,8 @@ def dataset_preprocess(dataset_id):
     filenames = data.get('filenames', [])
     prehandle = data.get('prehandle', 0)
     denoise = data.get('denoise', 0)
-    if prehandle not in (0, fun_type_2, fun_type_4):
+    if prehandle not in (
+            0, fun_type_2, fun_type_4, fun_type_6, fun_type_7, fun_type_8):
         return fail_api('预处理参数异常')
     if denoise not in (0, fun_type_3, fun_type_5):
         return fail_api('降噪参数异常')
