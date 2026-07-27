@@ -253,6 +253,35 @@
 
         <button class="page-btn" :disabled="currentPage >= maxPage" @click="changePage(currentPage +1)">下一页</button>
       </div>
+
+      <!-- ✅【新增拖拽上传区域】放在分页下面 -->
+      <div
+          class="drop-upload-area"
+          @click="triggerFileSelect"
+          @dragover.prevent="onDragOver"
+          @dragleave="onDragLeave"
+          @drop.prevent="onFileDrop"
+          :class="{drag_active: dragHover}"
+      >
+        <div class="upload-icon">
+          <!-- 上下箭头上传图标，可以替换为svg -->
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5">
+            <path d="M12 16V8"></path>
+            <path d="M9 11l3-3 3 3"></path>
+            <path d="M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4"></path>
+          </svg>
+        </div>
+        <h3 class="upload-title">All {{ dataset.image_count }} images loaded</h3>
+        <p class="upload-desc">Drag and drop more images here to expand your dataset.</p>
+        <input
+            ref="fileInputRef"
+            type="file"
+            multiple
+            accept=".jpg,.jpeg,.png,.tif,.tiff,.zip,.txt"
+            style="display:none"
+            @change="onFileSelect"
+        />
+      </div>
     </div>
 
     <!-- ========== Classes 标签页【改造完成】 ========== -->
@@ -260,7 +289,9 @@
       <div class="chart-card">
         <div class="chart-header-row">
           <h3>Class Distribution</h3>
-          <span class="chart-subtitle">{{ classList.length }} classes · {{ totalAnnotationCount }} total annotations</span>
+          <span class="chart-subtitle">{{ classList.length }} classes · {{
+              totalAnnotationCount
+            }} total annotations</span>
         </div>
         <div class="chart-box" ref="classChartWrap"></div>
       </div>
@@ -310,15 +341,17 @@
           <!-- 新增类别固定放在表格底部 -->
           <tfoot>
           <tr>
-            <td colspan="4" class="add-class-footer-row">
-              <span class="color-dot" style="background:#888;"></span>
-              <el-input
-                  v-model="newClassName"
-                  placeholder="Add new class..."
-                  class="add-class-input"
-                  @keyup.enter="addClass"
-              />
-              <button class="dark-btn small" @click="addClass">+ Add</button>
+            <td colspan="4" style="padding:12px 14px;">
+              <div style="display:flex; gap:12px; align-items:center;">
+                <el-input
+                    v-model="newClassName"
+                    placeholder="Add new class..."
+                    clearable
+                    style="flex:1;"
+                    @keyup.enter="addClass"
+                ></el-input>
+                <el-button type="primary" @click="addClass">+ Add</el-button>
+              </div>
             </td>
           </tr>
           </tfoot>
@@ -360,7 +393,7 @@
           <button class="close-btn" @click="closeViewer">✕</button>
         </div>
         <div class="modal-canvas-wrap">
-          <canvas ref="viewerCanvas" class="viewer-canvas" />
+          <canvas ref="viewerCanvas" class="viewer-canvas"/>
         </div>
         <div v-if="selectedImage.annotations?.length" class="annotation-table">
           <div class="table-head">标注明细</div>
@@ -369,7 +402,7 @@
               :key="idx"
               class="ann-row"
           >
-            <i :style="{ background: getBoxColor(ann.class_id) }" />
+            <i :style="{ background: getBoxColor(ann.class_id) }"/>
             <span>类别 #{{ ann.class_id }}</span>
             <span>{{ classNameMap[ann.class_id] || '未知类别' }}</span>
             <span>{{ categoryLabel(ann.class_id) }}</span>
@@ -395,9 +428,9 @@ import {
   disposeChart
 } from './datasetChartHelper'
 import * as echarts from 'echarts'
-import { getDataset, exportDatasetUrl } from '@/api/dataset'
-import { drawAnnotations } from '@/utils/annotationDrawer'
-import { CATEGORY_GROUPS, getBoxColor, getCategoryGroup } from '@/utils/datasetConstants'
+import {getDataset, exportDatasetUrl} from '@/api/dataset'
+import {drawAnnotations} from '@/utils/annotationDrawer'
+import {CATEGORY_GROUPS, getBoxColor, getCategoryGroup} from '@/utils/datasetConstants'
 import global from '@/global'
 import axios from 'axios'
 
@@ -415,17 +448,17 @@ export default {
       // Tab 配置
       activeTab: 'images',
       tabList: [
-        { label: 'Images', value: 'images' },
-        { label: 'Classes', value: 'classes' },
-        { label: 'Charts', value: 'charts' }
+        {label: 'Images', value: 'images'},
+        {label: 'Classes', value: 'classes'},
+        {label: 'Charts', value: 'charts'}
       ],
 
       // 视图控制
       viewMode: 'grid',
       viewModeList: [
-        { icon: '▦', value: 'grid', label: '网格视图' },
-        { icon: '☰', value: 'compact', label: '紧凑列表' },
-        { icon: '▤', value: 'table', label: '表格视图' }
+        {icon: '▦', value: 'grid', label: '网格视图'},
+        {icon: '☰', value: 'compact', label: '紧凑列表'},
+        {icon: '▤', value: 'table', label: '表格视图'}
       ],
       visiblePopover: false,
       showAnnotations: true,
@@ -466,6 +499,10 @@ export default {
       // table 排序
       tableSortField: 'filename',
       tableSortAsc: true,
+
+      // 拖拽上传区域新增变量
+      dragHover: false,
+      uploadLoading: false,
     }
   },
   computed: {
@@ -493,26 +530,26 @@ export default {
 
     sortedTableImages() {
       const list = [...this.pageImages]
-      list.sort((a,b)=>{
+      list.sort((a, b) => {
         let va = a[this.tableSortField]
         let vb = b[this.tableSortField]
 
         // 字符串文件名
-        if(this.tableSortField === 'filename'){
+        if (this.tableSortField === 'filename') {
           va = va?.toLowerCase() || ''
           vb = vb?.toLowerCase() || ''
-          if(va > vb) return this.tableSortAsc ? 1 : -1
-          if(va < vb) return this.tableSortAsc ? -1 : 1
+          if (va > vb) return this.tableSortAsc ? 1 : -1
+          if (va < vb) return this.tableSortAsc ? -1 : 1
           return 0
         }
         // 数字高度/宽度/标注数
-        if(['height','width','box_count'].includes(this.tableSortField)){
+        if (['height', 'width', 'box_count'].includes(this.tableSortField)) {
           va = Number(va || 0)
           vb = Number(vb || 0)
           return this.tableSortAsc ? va - vb : vb - va
         }
         // 文件大小 bytes
-        if(this.tableSortField === 'size'){
+        if (this.tableSortField === 'size') {
           va = Number(va || 0)
           vb = Number(vb || 0)
           return this.tableSortAsc ? va - vb : vb - va
@@ -549,8 +586,8 @@ export default {
     },
     // 切换到编辑模式自动聚焦输入框
     editDesc(newVal) {
-      if(newVal) {
-        this.$nextTick(()=>{
+      if (newVal) {
+        this.$nextTick(() => {
           this.$refs.descInputRef.focus()
         })
       }
@@ -642,7 +679,7 @@ export default {
       this.editName = false
     },
     // 保存简介专用方法【新增】
-    saveDesc(){
+    saveDesc() {
       this.editDesc = false
       this.saveDatasetInfo()
     },
@@ -664,8 +701,8 @@ export default {
     // 只加载数据集基础信息
     async loadDatasetBase() {
       try {
-        const res = await getDataset(this.$route.params.id, { page: 0, limit: 0 })
-        const { images, ...baseInfo } = res.data.data
+        const res = await getDataset(this.$route.params.id, {page: 0, limit: 0})
+        const {images, ...baseInfo} = res.data.data
         this.dataset = baseInfo
         if (!this.dataset.description) this.dataset.description = ''
         await this.loadDatasetClassMap(this.dataset.id)
@@ -764,10 +801,20 @@ export default {
     },
 
     addClass() {
-      if (!this.newClassName.trim()) return
-      console.log('新增类别：', this.newClassName)
-      // 此处后续对接后端新增class接口
-      this.newClassName = ''
+      const name = this.newClassName.trim()
+      if (!name) {
+        this.$message.warning("类别名称不能为空")
+        return
+      }
+      // 发起请求逻辑
+      axios.post(`/api/dataset/${this.dataset.id}/classes`, {
+        class_id: 自动分配ID,
+        name: name
+      }).then(res => {
+        this.newClassName = ""
+        // 重新刷新类别列表
+        this.loadClassData()
+      })
     },
 
     doExport() {
@@ -812,7 +859,7 @@ export default {
       if (!dom) return
       disposeChart(this.charts.splitPie)
       const chartIns = echarts.init(dom)
-      const { train_count = 0, val_count = 0 } = this.datasetStats
+      const {train_count = 0, val_count = 0} = this.datasetStats
       const option = getSplitPieOption(train_count, val_count)
       chartIns.setOption(option)
       this.charts.splitPie = chartIns
@@ -839,7 +886,7 @@ export default {
       if (!dom) return
       disposeChart(this.charts.objPerImgBar)
       const chartIns = echarts.init(dom)
-      const { object_count_list = [] } = this.datasetStats
+      const {object_count_list = []} = this.datasetStats
       const option = getObjPerImageBarOption(object_count_list)
       chartIns.setOption(option)
       this.charts.objPerImgBar = chartIns
@@ -850,7 +897,7 @@ export default {
       if (!dom) return
       disposeChart(this.charts.imageSizeBar)
       const chartIns = echarts.init(dom)
-      const { width_list = [], height_list = [] } = this.datasetStats
+      const {width_list = [], height_list = []} = this.datasetStats
       const option = getImageSizeBarOption(width_list, height_list)
       chartIns.setOption(option)
       this.charts.imageSizeBar = chartIns
@@ -886,7 +933,63 @@ export default {
       if (split === 'val') return 'split-val'
       if (split === 'test') return 'split-test'
       return ''
-    }
+    },
+
+    // 拖拽悬浮
+    onDragOver() {
+      this.dragHover = true
+    },
+    onDragLeave() {
+      this.dragHover = false
+    },
+
+    // 拖拽放下文件
+    async onFileDrop(e) {
+      this.dragHover = false
+      const files = Array.from(e.dataTransfer.files)
+      if (!files.length) return
+      await this.uploadFiles(files)
+    },
+
+    // 点击区域触发隐藏input
+    triggerFileSelect() {
+      this.$refs.fileInputRef.click()
+    },
+
+    // 文件选择器选中
+    async onFileSelect(e) {
+      const files = Array.from(e.target.files)
+      if (!files.length) return
+      await this.uploadFiles(files)
+      // 清空，防止重复选择同一个文件不触发change
+      e.target.value = ""
+    },
+
+    // 核心：调用已有上传接口
+    async uploadFiles(fileList) {
+      if (this.uploadLoading) return
+      this.uploadLoading = true
+      try {
+        const formData = new FormData()
+        fileList.forEach(f => {
+          formData.append("files", f)
+        })
+        const res = await this.$axios.post(`/api/dataset/${this.dataset.id}/upload`, formData, {
+          headers: {
+            "Content-Type": "multipart/form-data"
+          }
+        })
+        this.$message.success("上传完成")
+        // ✅上传完成刷新图片列表
+        this.currentPage = 1
+        this.loadImagePage()
+      } catch (err) {
+        console.error(err)
+        this.$message.error("上传失败")
+      } finally {
+        this.uploadLoading = false
+      }
+    },
   }
 }
 </script>
@@ -900,6 +1003,7 @@ export default {
   font-family: "Microsoft YaHei", sans-serif;
   box-sizing: border-box;
 }
+
 .page-header {
   display: flex;
   justify-content: space-between;
@@ -907,18 +1011,25 @@ export default {
   max-width: 1240px;
   margin: 0 auto 22px;
 }
+
 .back {
   color: #498ee6;
   font-size: 12px;
   cursor: pointer;
   margin-bottom: 6px;
 }
+
 .title-row {
   display: flex;
   align-items: center;
   gap: 12px;
 }
-.page-header h1 { margin: 0 0 8px; font-size: 28px; }
+
+.page-header h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+}
+
 .edit-btn {
   padding: 4px 10px;
   border-radius: 6px;
@@ -926,11 +1037,18 @@ export default {
   background: #fff;
   cursor: pointer;
 }
-.meta { margin: 0; color: #7f899b; font-size: 13px; }
+
+.meta {
+  margin: 0;
+  color: #7f899b;
+  font-size: 13px;
+}
+
 .desc-row {
   margin-top: 10px;
   max-width: 700px;
 }
+
 /* ========== 简介视图样式【新增】 ========== */
 .desc-view {
   position: relative;
@@ -939,20 +1057,24 @@ export default {
   cursor: pointer;
   transition: background-color 0.2s ease;
 }
+
 .desc-view:hover {
   background-color: #efefef;
 }
+
 /* 正文简介文字样式 */
 .desc-text {
   color: rgb(127, 137, 155);
   font-size: 16px;
   line-height: 1.6;
 }
+
 /* 空白占位文字 */
 .desc-placeholder {
   color: #a1a8b3;
   font-size: 16px;
 }
+
 .edit-pencil {
   position: absolute;
   right: 12px;
@@ -962,9 +1084,11 @@ export default {
   font-size: 18px;
   color: #666;
 }
+
 .desc-view:hover .edit-pencil {
   opacity: 0.8;
 }
+
 /* ======================================= */
 .dark-button {
   padding: 12px 18px;
@@ -984,6 +1108,7 @@ export default {
   gap: 4px;
   border-bottom: 1px solid #e3e8ef;
 }
+
 .tab-item {
   padding: 10px 16px;
   border: none;
@@ -992,11 +1117,13 @@ export default {
   cursor: pointer;
   border-bottom: 2px solid transparent;
 }
+
 .tab-item.active {
   border-bottom-color: #409eff;
   color: #409eff;
   font-weight: bold;
 }
+
 .tab-content {
   max-width: 1240px;
   margin: 0 auto;
@@ -1011,15 +1138,18 @@ export default {
   gap: 16px;
   flex-wrap: wrap;
 }
+
 .search-input {
   width: 320px;
 }
+
 .toolbar-right {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
 }
+
 .tool-btn {
   width: 36px;
   height: 36px;
@@ -1029,6 +1159,7 @@ export default {
   cursor: pointer;
   font-size: 16px;
 }
+
 .tool-btn.active {
   background: #edf4ff;
   border-color: #409eff;
@@ -1039,6 +1170,7 @@ export default {
 .dropdown-wrap {
   position: relative;
 }
+
 .dropdown-menu {
   position: absolute;
   top: 42px;
@@ -1048,9 +1180,10 @@ export default {
   background: #fff;
   border: 1px solid #e3e8ef;
   border-radius: 10px;
-  box-shadow: 0 6px 16px rgba(0,0,0,0.08);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
   z-index: 100;
 }
+
 .menu-title {
   font-size: 13px;
   color: #888;
@@ -1058,6 +1191,7 @@ export default {
   margin-bottom: 6px;
   border-bottom: 1px solid #f0f2f5;
 }
+
 .menu-item {
   display: block;
   padding: 6px 4px;
@@ -1079,6 +1213,7 @@ export default {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 16px;
 }
+
 .grid-card {
   border: 1px solid #e3e8ef;
   border-radius: 12px;
@@ -1086,29 +1221,35 @@ export default {
   background: #fff;
   cursor: pointer;
 }
+
 .grid-card.active {
   border-color: #409eff;
-  box-shadow: 0 0 0 2px rgba(64,158,255,0.2);
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
 }
+
 .preview-box {
   width: 100%;
   height: 160px;
   background: #f2f6fb;
 }
+
 .grid-canvas {
   width: 100%;
   height: 100%;
   display: block;
 }
+
 .card-footer {
   padding: 10px;
 }
+
 .filename {
   font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
 .info-text {
   font-size: 12px;
   color: #888;
@@ -1121,6 +1262,7 @@ export default {
   flex-direction: column;
   gap: 10px;
 }
+
 .compact-item {
   display: flex;
   gap: 12px;
@@ -1131,20 +1273,24 @@ export default {
   cursor: pointer;
   align-items: center;
 }
+
 .compact-item.active {
   border-color: #409eff;
 }
+
 .thumb-wrap {
   width: 80px;
   height: 60px;
   flex-shrink: 0;
   background: #f2f6fb;
 }
+
 .compact-canvas {
   width: 100%;
   height: 100%;
   display: block;
 }
+
 .compact-text {
   min-width: 0;
 }
@@ -1156,33 +1302,40 @@ export default {
   border: 1px solid #e3e8ef;
   overflow: hidden;
 }
+
 .table-view table {
   width: 100%;
   border-collapse: collapse;
 }
+
 .table-view th,
 .table-view td {
   padding: 12px 14px;
   text-align: left;
   border-bottom: 1px solid #f0f2f5;
   font-size: 14px;
-  vertical-align: middle;  /* 新增：垂直居中，解决上下错位 */
-  font-weight: normal;     /* 新增：表头取消默认加粗 */
+  vertical-align: middle; /* 新增：垂直居中，解决上下错位 */
+  font-weight: normal; /* 新增：表头取消默认加粗 */
 }
+
 .table-view th {
   background: #f8fafc;
 }
+
 .table-view tbody tr {
   cursor: pointer;
 }
+
 .table-view tbody tr.active {
   background: #f0f7ff;
 }
+
 .table-thumb {
   width: 80px;
   height: 50px;
   background: #f2f6fb;
 }
+
 .table-canvas {
   width: 100%;
   height: 100%;
@@ -1204,12 +1357,14 @@ export default {
   cursor: pointer;
   font-size: 14px;
   color: inherit;
-  padding: 0;       /* 新增：清除按钮默认内边距，防止水平偏移 */
+  padding: 0; /* 新增：清除按钮默认内边距，防止水平偏移 */
   margin: 0;
 }
+
 .table-sort-btn:hover {
   color: #409eff;
 }
+
 .classes-cell {
   display: inline-flex;
   flex-wrap: wrap;
@@ -1217,38 +1372,46 @@ export default {
   align-items: center;
   vertical-align: middle;
 }
+
 .class-tag {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size:13px;
+  font-size: 13px;
 }
+
 .color-dot-small {
   width: 10px;
-  height:10px;
-  border-radius:50%;
+  height: 10px;
+  border-radius: 50%;
 }
+
 .split-row {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   vertical-align: middle;
 }
+
 .split-dot {
   width: 12px;
   height: 12px;
   border-radius: 9999px;
   flex-shrink: 0;
 }
+
 .split-text {
   font-size: 14px;
 }
+
 .split-train .split-dot {
   background-color: #22c55e;
 }
+
 .split-val .split-dot {
   background-color: #3b82f6;
 }
+
 .split-test .split-dot {
   background-color: #a855f7;
 }
@@ -1263,10 +1426,12 @@ export default {
   justify-content: center;
   gap: 16px;
 }
+
 .page-info {
   color: #666;
   font-size: 14px;
 }
+
 .page-btn {
   padding: 6px 14px;
   border: 1px solid #e3e8ef;
@@ -1274,10 +1439,12 @@ export default {
   border-radius: 6px;
   cursor: pointer;
 }
+
 .page-btn:disabled {
   color: #ccc;
   cursor: not-allowed;
 }
+
 .page-jump-wrap {
   font-size: 14px;
   color: #333;
@@ -1285,6 +1452,7 @@ export default {
   align-items: center;
   gap: 6px;
 }
+
 .page-input {
   width: 56px;
   padding: 4px;
@@ -1300,10 +1468,12 @@ export default {
   align-items: baseline;
   margin-bottom: 12px;
 }
+
 .chart-subtitle {
-  color:#777;
-  font-size:13px;
+  color: #777;
+  font-size: 13px;
 }
+
 .chart-card {
   background: #fff;
   border-radius: 12px;
@@ -1311,6 +1481,7 @@ export default {
   padding: 16px;
   margin-bottom: 20px;
 }
+
 .chart-box {
   width: 100%;
   height: 320px;
@@ -1319,61 +1490,72 @@ export default {
   justify-content: center;
   color: #999;
 }
+
 .class-table-wrap {
   background: #fff;
   border-radius: 12px;
   border: 1px solid #e3e8ef;
   padding: 16px;
 }
+
 .table-head-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
 }
+
 .class-table {
   width: 100%;
   border-collapse: collapse;
 }
+
 .class-table th, .class-table td {
   padding: 10px;
   text-align: left;
   border-bottom: 1px solid #eee;
 }
+
 .sort-btn {
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size:14px;
-  color:#666;
+  font-size: 14px;
+  color: #666;
   padding: 0 4px;
 }
+
 .color-dot {
   display: inline-block;
-  width:12px;
-  height:12px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   margin-right: 8px;
   vertical-align: middle;
 }
+
 .class-table tfoot tr {
-  border-top:1px solid #eee;
+  border-top: 1px solid #eee;
 }
+
 .add-class-footer-row {
-  padding:12px 10px;
+  padding: 12px 10px;
   display: flex;
   align-items: center;
-  gap:10px;
+  gap: 10px;
 }
+
 .add-class-input {
-  flex:1;
+  flex: 1;
   max-width: 420px;
 }
+
 .empty-row {
   text-align: center;
   color: #999;
   padding: 30px 0;
 }
+
 .chart-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1384,13 +1566,14 @@ export default {
 .image-modal {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.6);
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 999;
   padding: 20px;
 }
+
 .modal-inner {
   width: min(1100px, 100%);
   max-height: 92vh;
@@ -1400,6 +1583,7 @@ export default {
   flex-direction: column;
   overflow: hidden;
 }
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -1407,6 +1591,7 @@ export default {
   padding: 16px 20px;
   border-bottom: 1px solid #eee;
 }
+
 .close-btn {
   margin-left: auto;
   border: none;
@@ -1414,6 +1599,7 @@ export default {
   font-size: 20px;
   cursor: pointer;
 }
+
 .modal-canvas-wrap {
   flex: 1;
   overflow: auto;
@@ -1421,11 +1607,13 @@ export default {
   padding: 16px;
   text-align: center;
 }
+
 .viewer-canvas {
   max-width: 100%;
   height: auto;
   display: inline-block;
 }
+
 .split-tag {
   padding: 2px 8px;
   border-radius: 999px;
@@ -1440,10 +1628,12 @@ export default {
   max-height: 260px;
   overflow-y: auto;
 }
+
 .table-head {
   padding-bottom: 10px;
   font-weight: bold;
 }
+
 .ann-row {
   display: flex;
   flex-wrap: wrap;
@@ -1452,6 +1642,7 @@ export default {
   padding: 8px 0;
   font-size: 13px;
 }
+
 .ann-row i {
   width: 10px;
   height: 10px;
@@ -1468,19 +1659,73 @@ export default {
 }
 
 @media (max-width: 900px) {
-  .detail-page { padding: 20px 16px; }
-  .page-header { flex-direction: column; align-items: flex-start; gap: 14px; }
-  .toolbar { flex-direction: column; align-items: flex-start; }
-  .search-input { width: 100%; }
-  .toolbar-right { margin-left: unset; }
+  .detail-page {
+    padding: 20px 16px;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+
+  .toolbar-right {
+    margin-left: unset;
+  }
+
   .grid-view {
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   }
+
   .pagination-bar {
     flex-wrap: wrap;
   }
+
   .chart-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Images页面新增上传区域 */
+.drop-upload-area {
+  margin-top: 24px;
+  border: 2px dashed #d0d0d0;
+  border-radius: 8px;
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  border-radius: 30px;
+}
+
+.drop-upload-area.drag_active {
+  border-color: #409eff;
+  background-color: rgba(64, 158, 255, 0.05);
+}
+
+.upload-icon {
+  margin-bottom: 16px;
+}
+
+.upload-title {
+  font-size: 22px;
+  font-weight: 500;
+  color: #222;
+  margin: 0 0 8px;
+}
+
+.upload-desc {
+  font-size: 16px;
+  color: #777;
+  margin: 0;
 }
 </style>
