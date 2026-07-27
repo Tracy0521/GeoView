@@ -38,12 +38,24 @@ def resolve_model_path(reference):
 def execute(model_path, data_path, out_dir, names, threshold=0.2):
     image_list = [osp.join(data_path, name) for name in names]
     detector = YOLO(model_path)
-    results = detector.predict(source=image_list, conf=threshold, verbose=False)
+    # Keep folder inference memory-bounded. Without stream=True Ultralytics
+    # materializes every Results object (including tensors) before returning,
+    # which can require tens of GB for a large folder.
+    results = detector.predict(
+        source=image_list,
+        conf=threshold,
+        batch=1,
+        stream=True,
+        verbose=False,
+    )
     output_urls = []
     os.makedirs(out_dir, exist_ok=True)
     for name, result in zip(names, results):
         new_name = md5_name(name)
-        if not cv2.imwrite(osp.join(out_dir, new_name), result.plot()):
+        plotted = result.plot()
+        if not cv2.imwrite(osp.join(out_dir, new_name), plotted):
             raise RuntimeError('检测结果保存失败：{}'.format(name))
         output_urls.append(generate_url + new_name)
+        del plotted
+        del result
     return output_urls

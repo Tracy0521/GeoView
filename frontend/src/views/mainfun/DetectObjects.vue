@@ -107,14 +107,19 @@
           <div class="setting-copy">
             <span class="mini-icon"><i class="iconfont icon-crop-full" /></span>
             <div>
-              <strong>上传时编辑图片</strong>
-              <small>进入裁剪与区域编辑</small>
+              <strong>编辑待检测图片</strong>
+              <small>{{ fileList.length ? '裁剪、切片结果将保存到待检测队列' : '请先选择需要编辑的图片' }}</small>
             </div>
           </div>
-          <label class="switch-control">
-            <input ref="cut" type="checkbox" @change="select()">
-            <span />
-          </label>
+          <button
+            class="edit-entry"
+            type="button"
+            :disabled="!fileList.length"
+            @click="openImageEditor"
+          >
+            <i class="iconfont icon-crop-full" />
+            进入编辑
+          </button>
         </div>
 
         <div class="setting-group option-setting">
@@ -179,11 +184,24 @@
         <el-button
           type="primary"
           class="start-button"
+          :disabled="batchProgress.visible && batchProgress.percentage < 100"
           @click="upload('目标检测','object_detection')"
         >
           <span>开始智能检测</span>
           <i>→</i>
         </el-button>
+        <div v-if="batchProgress.visible" class="batch-progress">
+          <div>
+            <span>{{ batchProgress.label }}</span>
+            <strong>{{ batchProgress.percentage }}%</strong>
+          </div>
+          <el-progress
+            :percentage="batchProgress.percentage"
+            :show-text="false"
+            :stroke-width="8"
+            :status="batchProgress.percentage===100 ? 'success' : undefined"
+          />
+        </div>
         <p class="start-hint">检测时间取决于图片数量、分辨率和所选模型</p>
       </aside>
     </section>
@@ -198,25 +216,23 @@
         </div>
       </div>
       <div class="preview-grid">
-        <div v-for="(item,index) in before" :key="`before-${index}`" class="preview-item">
-          <el-image :src="item" :preview-src-list="[item]" :preview-teleported="true" />
-          <div class="preview-caption"><span>原始影像</span><small>ORIGINAL</small></div>
-        </div>
-        <template v-if="uploadSrc.prehandle===2">
-          <div v-for="(item,index) in claheImg" :key="`clahe-${index}`" class="preview-item">
+        <template v-for="(item,index) in before" :key="`preview-pair-${index}`">
+          <div class="preview-item">
             <el-image :src="item" :preview-src-list="[item]" :preview-teleported="true" />
+            <div class="preview-caption"><span>原始影像</span><small>ORIGINAL</small></div>
+          </div>
+          <div v-if="uploadSrc.prehandle===2 && claheImg[index]" class="preview-item">
+            <el-image :src="claheImg[index]" :preview-src-list="[claheImg[index]]" :preview-teleported="true" />
             <div class="preview-caption">
               <span>CLAHE 处理后</span>
-              <button type="button" @click="downloadimgWithWords(-1,item,`CLAHE处理图.png`)"><i class="iconfont icon-xiazai" /></button>
+              <button type="button" @click="downloadimgWithWords(-1,claheImg[index],`CLAHE处理图.png`)"><i class="iconfont icon-xiazai" /></button>
             </div>
           </div>
-        </template>
-        <template v-if="uploadSrc.prehandle===4">
-          <div v-for="(item,index) in sharpenImg" :key="`sharpen-${index}`" class="preview-item">
-            <el-image :src="item" :preview-src-list="[item]" :preview-teleported="true" />
+          <div v-else-if="uploadSrc.prehandle===4 && sharpenImg[index]" class="preview-item">
+            <el-image :src="sharpenImg[index]" :preview-src-list="[sharpenImg[index]]" :preview-teleported="true" />
             <div class="preview-caption">
               <span>锐化处理后</span>
-              <button type="button" @click="downloadimgWithWords(-1,item,`锐化处理图.png`)"><i class="iconfont icon-xiazai" /></button>
+              <button type="button" @click="downloadimgWithWords(-1,sharpenImg[index],`锐化处理图.png`)"><i class="iconfont icon-xiazai" /></button>
             </div>
           </div>
         </template>
@@ -246,19 +262,22 @@
 
     <el-dialog
       v-model="cutVisible"
-      :modal="false"
-      title="编辑"
-      width="75%"
-      top="0"
+      title="裁剪与区域编辑"
+      width="92%"
+      top="3vh"
+      class="image-editor-dialog"
+      :close-on-click-modal="false"
+      destroy-on-close
     >
       <MyVueCropper
         :fileimg="fileimg"
         :funtype="funtype"
         :file="file"
-        :child_prehandle="uploadSrc.prehandle"
-        :child_denoise="uploadSrc.denoise"
+        :child-prehandle="uploadSrc.prehandle"
+        :child-denoise="uploadSrc.denoise"
         :child-model-path="uploadSrc.model_path"
         @cut-changed="notvisible"
+        @save-files="saveEditedFiles"
         @child-refresh="getMore"
       />
     </el-dialog>
@@ -295,7 +314,6 @@ export default {
       before:[],
       fileimg: "",
       file: {},
-      isNotCut: true,
       cutVisible: false,
       funtype: "目标检测",
       scrollTop: "",
@@ -315,6 +333,12 @@ export default {
         type:4
       },
       imgArr:[]
+      ,
+      batchProgress: {
+        visible: false,
+        percentage: 0,
+        label: ""
+      }
     };
   },
   watch:{
@@ -357,7 +381,30 @@ export default {
     },
     notvisible() {
       this.cutVisible = false;
-      this.fileList = [];
+    },
+    normalizedFile(item) {
+      return item && item.raw ? item.raw : item;
+    },
+    openImageEditor() {
+      if (!this.fileList.length) {
+        this.$message.warning("请先选择需要编辑的图片");
+        return;
+      }
+      this.file = this.normalizedFile(this.fileList[0]);
+      this.fileimg = window.URL.createObjectURL(this.file);
+      this.cutVisible = true;
+    },
+    saveEditedFiles(files) {
+      const source = this.file;
+      const sourceIndex = this.fileList.findIndex((item) => this.normalizedFile(item) === source);
+      const nextList = [...this.fileList];
+      if (sourceIndex >= 0) nextList.splice(sourceIndex, 1, ...files);
+      else nextList.push(...files);
+      this.fileList = nextList;
+      this.cutVisible = false;
+      this.$message.success(files.length > 1
+        ? `已保存 ${files.length} 张切片，点击“开始智能检测”后统一处理`
+        : "编辑结果已保存，点击“开始智能检测”后处理");
     },
     getMore() {
       this.getUploadImg("目标检测");
@@ -377,21 +424,17 @@ export default {
       document.querySelector("#folder").click();
     },
     beforeUpload(file) {
-      this.cutVisible = this.$refs.cut.checked;
-        const fileSuffix = file.name.substring(file.name.lastIndexOf(".") + 1)
-  const whiteList = ['jpg','jpeg','png','JPG','JPEG']
+      this.file = file;
+      const fileSuffix = file.name.substring(file.name.lastIndexOf(".") + 1)
+  const whiteList = ['jpg','jpeg','png','JPG','JPEG','PNG']
   if (whiteList.indexOf(fileSuffix) === -1) {
     this.$message.error("只允许上传jpg, jpeg, png, JPG, 或JPEG格式,请重新上传");
     this.fileList= []
     this.canUpload = false
-  this.cutVisible = false;
   }
      else{
         this.canUpload = true
     this.fileimg = window.URL.createObjectURL(new Blob([file]));}
-    },
-    select() {
-      this.isNotCut = this.$refs.cut.checked;
     },
   },
 };
@@ -580,7 +623,40 @@ export default {
   background: #f5faff;
   box-shadow: inset 0 0 0 3px rgba(61,147,241,.055);
 }
-.upload-card :deep(.el-upload-list) { text-align: left; }
+.upload-card :deep(.el-upload-list) {
+  max-height: 210px;
+  margin: 14px 2px 0;
+  padding: 4px 8px 4px 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid #e7edf4;
+  border-radius: 10px;
+  background: #fafbfd;
+  text-align: left;
+  scrollbar-width: thin;
+  scrollbar-color: #bdc9d8 transparent;
+}
+.upload-card :deep(.el-upload-list:empty) { display: none; }
+.upload-card :deep(.el-upload-list__item) {
+  height: 32px;
+  margin: 0;
+  padding-right: 30px;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+.upload-card :deep(.el-upload-list__item-name) {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.upload-card :deep(.el-upload-list::-webkit-scrollbar) { width: 7px; }
+.upload-card :deep(.el-upload-list::-webkit-scrollbar-track) { background: transparent; }
+.upload-card :deep(.el-upload-list::-webkit-scrollbar-thumb) {
+  border-radius: 8px;
+  background: #c4ceda;
+}
+.upload-card :deep(.el-upload-list::-webkit-scrollbar-thumb:hover) { background: #9facbb; }
 
 .upload-illustration {
   position: relative;
@@ -655,6 +731,26 @@ export default {
 .setting-title strong { color: #344056; font-size: 13px; }
 .setting-copy small,
 .setting-title small { margin-top: 3px; color: #9aa4b3; font-size: 10px; }
+.edit-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid #b9d6f6;
+  border-radius: 9px;
+  color: #287fdc;
+  background: #f2f8ff;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: .2s;
+}
+.edit-entry:hover:not(:disabled) { border-color: #67a9ed; background: #e8f4ff; transform: translateY(-1px); }
+.edit-entry:disabled { border-color: #e1e6ed; color: #a9b1bd; background: #f5f6f8; cursor: not-allowed; }
+.edit-entry .iconfont { font-size: 13px; }
 .mini-icon {
   display: grid;
   place-items: center;
@@ -727,6 +823,9 @@ export default {
 .start-button i { margin-left: 11px; font-size: 18px; font-style: normal; }
 .start-button:hover { transform: translateY(-1px); box-shadow: 0 12px 26px rgba(42,127,225,.3); }
 .start-hint { margin: 10px 0 0; color: #9ca5b2; font-size: 9px; text-align: center; }
+.batch-progress{margin-top:13px;padding:11px 12px;border:1px solid #dce9f7;border-radius:10px;background:#f6faff}
+.batch-progress>div{display:flex;justify-content:space-between;gap:12px;margin-bottom:8px;color:#64748a;font-size:10px}
+.batch-progress strong{color:#287ed9;font-size:10px}.batch-progress :deep(.el-progress-bar__outer){background:#e2ebf5}
 
 .preview-panel { margin-top: 22px; }
 .preview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
