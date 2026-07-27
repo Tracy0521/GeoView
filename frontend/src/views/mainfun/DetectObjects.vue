@@ -273,6 +273,7 @@
         :fileimg="fileimg"
         :funtype="funtype"
         :file="file"
+        :files="fileList"
         :child-prehandle="uploadSrc.prehandle"
         :child-denoise="uploadSrc.denoise"
         :child-model-path="uploadSrc.model_path"
@@ -394,7 +395,15 @@ export default {
       this.fileimg = window.URL.createObjectURL(this.file);
       this.cutVisible = true;
     },
-    saveEditedFiles(files) {
+    saveEditedFiles(files, options = {}) {
+      if (options.replaceAll) {
+        this.fileList = files;
+        this.cutVisible = false;
+        this.$message.success(
+          `已将 ${options.sourceCount || 1} 张原图批量切分为 ${files.length} 张，点击“开始智能检测”后统一处理`
+        );
+        return;
+      }
       const source = this.file;
       const sourceIndex = this.fileList.findIndex((item) => this.normalizedFile(item) === source);
       const nextList = [...this.fileList];

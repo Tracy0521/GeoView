@@ -57,7 +57,14 @@
           </div>
           <div class="result-preview-list">
             <figure v-for="item in tilePreviews" :key="item.index">
-              <img :src="item.src" :alt="`预计切片 ${item.index}`">
+              <el-image
+                class="tile-result-image"
+                :src="item.src"
+                :preview-src-list="[item.src]"
+                :preview-teleported="true"
+                fit="contain"
+                :alt="`预计切片 ${item.index}`"
+              />
               <figcaption>
                 <strong>#{{ item.index }}</strong>
                 <small>{{ item.x }}, {{ item.y }}</small>
@@ -72,7 +79,10 @@
       <aside class="tool-panel tile-settings">
         <div class="panel-title">
           <strong>切片参数</strong>
-          <small v-if="sourceSize.width">{{ sourceSize.width }} × {{ sourceSize.height }} px 原始影像</small>
+          <small v-if="sourceSize.width">
+            当前预览 {{ sourceSize.width }} × {{ sourceSize.height }} px
+            <template v-if="sourceFiles.length > 1"> · 将应用到全部 {{ sourceFiles.length }} 张图片</template>
+          </small>
         </div>
         <div class="size-fields">
           <label>
@@ -92,7 +102,7 @@
           <small>适当重叠可避免目标在切片边缘被截断，推荐 10%–25%</small>
         </label>
         <div class="tile-summary">
-          <div><span>预计生成</span><strong>{{ tilePlan.length }}</strong><small>张切片</small></div>
+          <div><span>{{ sourceFiles.length > 1 ? '当前单张预计' : '预计生成' }}</span><strong>{{ tilePlan.length }}</strong><small>张切片</small></div>
           <div><span>移动步长</span><strong>{{ stepX }} × {{ stepY }}</strong><small>px</small></div>
         </div>
         <p v-if="tilePlan.length > 200" class="warning">切片数量较多，处理耗时可能明显增加。</p>
@@ -103,7 +113,7 @@
           :disabled="!tilePlan.length || imageLoading"
           @click="saveTiles"
         >
-          生成并保存 {{ tilePlan.length }} 张切片
+          {{ sourceFiles.length > 1 ? `批量切片 ${sourceFiles.length} 张图片` : `生成并保存 ${tilePlan.length} 张切片` }}
         </el-button>
       </aside>
     </div>
@@ -123,6 +133,7 @@ export default {
     fileimg: { type: String, default: "" },
     funtype: { type: String, default: "" },
     file: { type: Object, default: () => ({}) },
+    files: { type: Array, default: () => [] },
   },
   emits: ["cut-changed", "save-files"],
   data() {
@@ -140,6 +151,13 @@ export default {
     };
   },
   computed: {
+    sourceFiles() {
+      const sourceItems = Array.isArray(this.files) ? this.files : [];
+      const values = sourceItems
+        .map((item) => item && item.raw ? item.raw : item)
+        .filter((item) => item instanceof Blob);
+      return values.length ? values : (this.file instanceof Blob ? [this.file] : []);
+    },
     maxTileWidth() { return Math.max(64, this.sourceSize.width || 8192); },
     maxTileHeight() { return Math.max(64, this.sourceSize.height || 8192); },
     effectiveTileWidth() { return Math.min(this.tileWidth, this.sourceSize.width || this.tileWidth); },
@@ -148,11 +166,7 @@ export default {
     stepY() { return Math.max(1, Math.round(this.effectiveTileHeight * (1 - this.overlap / 100))); },
     tilePlan() {
       if (!this.sourceSize.width || !this.sourceSize.height) return [];
-      const xs = this.axisPositions(this.sourceSize.width, this.effectiveTileWidth, this.stepX);
-      const ys = this.axisPositions(this.sourceSize.height, this.effectiveTileHeight, this.stepY);
-      return ys.flatMap((y) => xs.map((x) => ({
-        x, y, width: this.effectiveTileWidth, height: this.effectiveTileHeight,
-      })));
+      return this.planForSize(this.sourceSize.width, this.sourceSize.height);
     },
   },
   watch: {
@@ -170,6 +184,32 @@ export default {
       const finalPosition = total - size;
       if (positions[positions.length - 1] !== finalPosition) positions.push(finalPosition);
       return positions;
+    },
+    planForSize(width, height) {
+      const tileWidth = Math.min(this.tileWidth, width);
+      const tileHeight = Math.min(this.tileHeight, height);
+      const stepX = Math.max(1, Math.round(tileWidth * (1 - this.overlap / 100)));
+      const stepY = Math.max(1, Math.round(tileHeight * (1 - this.overlap / 100)));
+      const xs = this.axisPositions(width, tileWidth, stepX);
+      const ys = this.axisPositions(height, tileHeight, stepY);
+      return ys.flatMap((y) => xs.map((x) => ({
+        x, y, width: tileWidth, height: tileHeight,
+      })));
+    },
+    loadImageFromFile(file) {
+      return new Promise((resolve, reject) => {
+        const source = URL.createObjectURL(file);
+        const image = new Image();
+        image.onload = () => {
+          URL.revokeObjectURL(source);
+          resolve(image);
+        };
+        image.onerror = () => {
+          URL.revokeObjectURL(source);
+          reject(new Error(`无法读取图片：${file.name || "未命名图片"}`));
+        };
+        image.src = source;
+      });
     },
     loadSourceImage() {
       if (!this.fileimg) return;
@@ -227,7 +267,10 @@ export default {
       }
       this.tilePreviews = this.tilePlan.slice(0, this.previewLimit).map((tile, index) => {
         const canvas = document.createElement("canvas");
-        const scale = Math.min(1, 220 / tile.width, 150 / tile.height);
+        // Keep enough pixels for the fullscreen viewer. The list itself is
+        // visually downsized by CSS, while the preview overlay uses this
+        // higher-resolution source.
+        const scale = Math.min(1, 1600 / tile.width, 1200 / tile.height);
         canvas.width = Math.max(1, Math.round(tile.width * scale));
         canvas.height = Math.max(1, Math.round(tile.height * scale));
         canvas.getContext("2d").drawImage(
@@ -239,7 +282,7 @@ export default {
           index: index + 1,
           x: tile.x,
           y: tile.y,
-          src: canvas.toDataURL("image/jpeg", .78),
+          src: canvas.toDataURL("image/jpeg", .94),
         };
       });
     },
@@ -253,35 +296,58 @@ export default {
       });
     },
     async saveTiles() {
-      if (this.tilePlan.length > 500) {
+      const estimatedCount = this.tilePlan.length * Math.max(1, this.sourceFiles.length);
+      if (estimatedCount > 500) {
         this.$message.warning("切片数量超过 500 张，请增大切片尺寸或降低重叠程度");
         return;
       }
       this.uploading = true;
       try {
         const files = [];
-        for (let index = 0; index < this.tilePlan.length; index += 1) {
-          const tile = this.tilePlan[index];
-          const canvas = document.createElement("canvas");
-          canvas.width = tile.width;
-          canvas.height = tile.height;
-          canvas.getContext("2d").drawImage(
-            this.sourceImage,
-            tile.x, tile.y, tile.width, tile.height,
-            0, 0, tile.width, tile.height
-          );
-          const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-          files.push(new File([blob], this.outputName("tile", index + 1), { type: "image/png" }));
+        for (const sourceFile of this.sourceFiles) {
+          const sourceImage = sourceFile === this.file && this.sourceImage
+            ? this.sourceImage
+            : await this.loadImageFromFile(sourceFile);
+          const plan = this.planForSize(sourceImage.naturalWidth, sourceImage.naturalHeight);
+          if (files.length + plan.length > 500) {
+            throw new Error("TOTAL_TILE_LIMIT");
+          }
+          for (let index = 0; index < plan.length; index += 1) {
+            const tile = plan[index];
+            const canvas = document.createElement("canvas");
+            canvas.width = tile.width;
+            canvas.height = tile.height;
+            canvas.getContext("2d").drawImage(
+              sourceImage,
+              tile.x, tile.y, tile.width, tile.height,
+              0, 0, tile.width, tile.height
+            );
+            const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+            if (!blob) throw new Error("TILE_ENCODING_FAILED");
+            files.push(new File(
+              [blob],
+              this.outputNameFor(sourceFile, "tile", index + 1),
+              { type: "image/png" }
+            ));
+          }
         }
-        this.$emit("save-files", files);
+        this.$emit("save-files", files, {
+          replaceAll: this.sourceFiles.length > 1,
+          sourceCount: this.sourceFiles.length,
+        });
       } catch (error) {
-        this.$message.error("切片生成失败，请调整参数后重试");
+        this.$message.error(error.message === "TOTAL_TILE_LIMIT"
+          ? "实际切片数量超过 500 张，请增大切片尺寸或降低重叠程度"
+          : "批量切片生成失败，请调整参数后重试");
       } finally {
         this.uploading = false;
       }
     },
     outputName(kind, index) {
-      const base = (this.file.name || "image").replace(/\.[^.]+$/, "");
+      return this.outputNameFor(this.file, kind, index);
+    },
+    outputNameFor(file, kind, index) {
+      const base = (file.name || "image").replace(/\.[^.]+$/, "");
       return `${base}_${kind}_${String(index).padStart(3, "0")}.png`;
     },
   },
@@ -310,7 +376,9 @@ export default {
 .result-preview-list{display:grid;grid-auto-flow:column;grid-auto-columns:138px;gap:10px;overflow-x:auto;padding:0 0 8px;scrollbar-width:thin;scrollbar-color:#60778f transparent}
 .result-preview-list::-webkit-scrollbar{height:6px}.result-preview-list::-webkit-scrollbar-thumb{border-radius:8px;background:#60778f}
 .result-preview-list figure{overflow:hidden;margin:0;border:1px solid rgba(203,221,240,.17);border-radius:9px;background:#0e1721}
-.result-preview-list img{display:block;width:100%;height:92px;object-fit:cover;background:#0b1118}
+.result-preview-list :deep(.tile-result-image){display:block;width:100%;height:110px;background:#0b1118;cursor:zoom-in}
+.result-preview-list :deep(.tile-result-image img){object-fit:contain;transition:transform .2s}
+.result-preview-list figure:hover :deep(.tile-result-image img){transform:scale(1.025)}
 .result-preview-list figcaption{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 8px;color:#dce9f7}
 .result-preview-list figcaption strong{font-size:10px}.result-preview-list figcaption small{overflow:hidden;color:#8095aa;font-size:8px;text-overflow:ellipsis;white-space:nowrap}
 .preview-more{margin:8px 0 0;color:#8fa2b6;font-size:9px;text-align:right}
