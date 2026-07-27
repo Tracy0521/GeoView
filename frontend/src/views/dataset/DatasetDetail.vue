@@ -30,7 +30,7 @@
           >
             <span v-if="dataset.description" class="desc-text">{{ dataset.description }}</span>
             <span v-else class="desc-placeholder">添加数据集简介</span>
-            <span class="edit-pencil">✏</span>
+            <!--            <span class="edit-pencil">✏</span>-->
           </div>
           <!-- 编辑输入框 -->
           <el-input
@@ -111,6 +111,8 @@
               class="grid-card"
               :class="{ active: selectedImage?.id === img.id }"
               @click="openImageViewer(img)"
+              @mouseenter="hoverGridImgId = img.id"
+              @mouseleave="hoverGridImgId = null"
           >
             <div class="preview-box">
               <canvas
@@ -118,10 +120,38 @@
                   class="grid-canvas"
                   :data-img-id="img.id"
               ></canvas>
+              <!-- hover浮现操作按钮 -->
+              <div v-if="hoverGridImgId === img.id" class="grid-card-actions" @click.stop>
+                <!-- 下载按钮，width和height从20改成18，缩小尺寸 -->
+                <button class="action-btn" @click="downloadSingleImage(img)" title="下载图片">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                       stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 5v9"></path>
+                    <path d="M9 11l3 3 3-3"></path>
+                    <path d="M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4"></path>
+                  </svg>
+                </button>
+                <!-- 删除按钮同步修改 -->
+                <button class="action-btn danger" @click="deleteSingleImage(img)" title="删除图片">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                       stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2"></path>
+                    <line x1="10" y1="11" x2="10" y2="17"></line>
+                    <line x1="14" y1="11" x2="14" y2="17"></line>
+                  </svg>
+                </button>
+              </div>
             </div>
             <div class="card-footer">
               <div class="filename">{{ img.filename }}</div>
-              <div class="info-text">{{ img.box_count }} 框</div>
+              <div class="info-text">
+                {{ img.width }}×{{ img.height }}
+                <template v-if="img.split && img.split !== 'unset'">
+                  · {{ getSplitName(img.split) }}
+                </template>
+                · {{ img.box_count }} annotations
+              </div>
             </div>
           </div>
         </div>
@@ -382,7 +412,7 @@
     </div>
 
     <!-- 大图查看弹窗【标注明细展示真实类别名称】 -->
-    <div v-if="selectedImage" class="image-modal" @click.self="closeViewer">
+    <div v-if="selectedImage" class="image-modal" @click.self="closeViewer" @wheel.prevent="onCanvasWheel">
       <div class="modal-inner">
         <div class="modal-header">
           <strong>{{ selectedImage.filename }}</strong>
@@ -390,10 +420,19 @@
           <span v-if="selectedImage.split && selectedImage.split !== 'unset'" class="split-tag">
             {{ getSplitName(selectedImage.split) }}
           </span>
+          <span style="margin-left:auto;font-size:12px;color:#888;">缩放: {{ canvasScale.toFixed(2) }}x</span>
           <button class="close-btn" @click="closeViewer">✕</button>
         </div>
-        <div class="modal-canvas-wrap">
-          <canvas ref="viewerCanvas" class="viewer-canvas"/>
+        <div class="modal-canvas-wrap" ref="canvasWrapRef" @mousedown="onCanvasMouseDown" @mousemove="onCanvasMouseMove"
+             @mouseup="onCanvasMouseUp" @mouseleave="onCanvasMouseUp">
+          <canvas ref="viewerCanvas" class="viewer-canvas"
+                  :style="{transform:`scale(${canvasScale}) translate(${canvasOffset.x}px,${canvasOffset.y}px)`}"/>
+        </div>
+        <!-- 底部切换栏 -->
+        <div class="viewer-bottom-bar">
+          <button class="switch-btn" :disabled="!hasPrevImage" @click="switchPrevImage">← 上一张</button>
+          <span class="page-indicator">{{ currentImgIndex }} / {{ totalImgCount }}</span>
+          <button class="switch-btn" :disabled="!hasNextImage" @click="switchNextImage">下一张 →</button>
         </div>
         <div v-if="selectedImage.annotations?.length" class="annotation-table">
           <div class="table-head">标注明细</div>
@@ -401,6 +440,8 @@
               v-for="(ann, idx) in selectedImage.annotations"
               :key="idx"
               class="ann-row"
+              :class="{active: highlightAnnIndex === idx}"
+              @click="setHighlightAnn(idx)"
           >
             <i :style="{ background: getBoxColor(ann.class_id) }"/>
             <span>类别 #{{ ann.class_id }}</span>
@@ -503,8 +544,23 @@ export default {
       // 拖拽上传区域新增变量
       dragHover: false,
       uploadLoading: false,
+
+      /* 卡片悬浮效果相关（？ */
+      hoverGridImgId: null,
+
+      /* 大图缩放、平移 */
+      canvasScale: 1,
+      canvasOffset: {x: 0, y: 0},
+      isDragging: false,
+      dragStart: {x: 0, y: 0},
+      /* 高亮选中标注下标 */
+      highlightAnnIndex: -1,
+      /* 弹窗图片分页索引 */
+      currentImgIndex: 0,
+      totalImgCount: 0,
     }
   },
+
   computed: {
     // 删除原来的 pageImages(){}
     pageImages() {
@@ -558,7 +614,16 @@ export default {
       })
       return list
     },
+
+    /* 上下张切换计算属性 */
+    hasPrevImage() {
+      return this.currentImgIndex > 0
+    },
+    hasNextImage() {
+      return this.currentImgIndex < this.totalImgCount - 1
+    },
   },
+
   watch: {
     '$route.params.id': {
       immediate: true,
@@ -605,6 +670,7 @@ export default {
       this.jumpPageNum = newVal
     }
   },
+
   methods: {
     getBoxColor,
     fullUrl(path) {
@@ -750,13 +816,72 @@ export default {
     },
 
     openImageViewer(img) {
+      // 重置缩放、高亮状态
+      this.canvasScale = 1
+      this.canvasOffset = {x: 0, y: 0}
+      this.highlightAnnIndex = -1
+
       this.selectedImage = img
+      // 计算当前图片在列表中的序号
+      this.currentImgIndex = this.pageImages.findIndex(p => p.id === img.id)
+      this.totalImgCount = this.pageImages.length
+
       this.$nextTick(() => this.renderSelectedBig())
     },
     closeViewer() {
       this.selectedImage = null
+      this.canvasScale = 1
+      this.canvasOffset = {x: 0, y: 0}
+      this.highlightAnnIndex = -1
+    },
+    /* 滚轮缩放 */
+    onCanvasWheel(e) {
+      const scaleStep = 0.12
+      const minScale = 0.4
+      const maxScale = 3.5
+      if (e.deltaY < 0) {
+        this.canvasScale = Math.min(this.canvasScale + scaleStep, maxScale)
+      } else {
+        this.canvasScale = Math.max(this.canvasScale - scaleStep, minScale)
+      }
+    },
+    /* 画布拖拽平移（配套缩放体验） */
+    onCanvasMouseDown(e) {
+      this.isDragging = true
+      this.dragStart.x = e.clientX - this.canvasOffset.x
+      this.dragStart.y = e.clientY - this.canvasOffset.y
+    },
+    onCanvasMouseMove(e) {
+      if (!this.isDragging) return
+      this.canvasOffset.x = e.clientX - this.dragStart.x
+      this.canvasOffset.y = e.clientY - this.dragStart.y
+    },
+    onCanvasMouseUp() {
+      this.isDragging = false
+    },
+    /* 标注明细点击高亮 */
+    setHighlightAnn(idx) {
+      if (this.highlightAnnIndex === idx) {
+        this.highlightAnnIndex = -1
+      } else {
+        this.highlightAnnIndex = idx
+      }
+      this.$nextTick(() => this.renderSelectedBig())
     },
 
+    /* 切换图片方法 */
+    switchPrevImage() {
+      if (!this.hasPrevImage) return
+      const nextImg = this.pageImages[this.currentImgIndex - 1]
+      this.openImageViewer(nextImg)
+    },
+    switchNextImage() {
+      if (!this.hasNextImage) return
+      const nextImg = this.pageImages[this.currentImgIndex + 1]
+      this.openImageViewer(nextImg)
+    },
+
+    /* 改动：绘制时区分普通标注、高亮标注（高亮改为「边框加粗 + 框内半透明填充」） */
     renderSelectedBig() {
       if (!this.selectedImage) return
       const canvas = this.$refs.viewerCanvas
@@ -764,9 +889,44 @@ export default {
       const img = new Image()
       img.crossOrigin = 'anonymous'
       img.onload = () => {
-        drawAnnotations(canvas, img, this.selectedImage.annotations || [], {
-          showBox: this.showAnnotations,
-          showLabel: this.showClassLabel
+        const ctx = canvas.getContext('2d')
+        canvas.width = img.width
+        canvas.height = img.height
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        ctx.drawImage(img, 0, 0)
+
+        const annos = this.selectedImage.annotations || []
+        annos.forEach((ann, idx) => {
+          const cx = ann.x * img.width
+          const cy = ann.y * img.height
+          const bw = ann.w * img.width
+          const bh = ann.h * img.height
+          const x = cx - bw / 2
+          const y = cy - bh / 2
+
+          // 判断是否为高亮条目
+          const isHighlight = this.highlightAnnIndex === idx
+          const baseColor = this.getBoxColor(ann.class_id)
+          const className = this.classNameMap[ann.class_id] || 'unknown'
+
+          // ========= 第一步：先绘制标签（置顶，防止被遮挡） =========
+          const textH = 18
+          ctx.fillStyle = baseColor
+          ctx.fillRect(x, y - textH, ctx.measureText(className).width + 6, textH)
+          ctx.fillStyle = '#ffffff'
+          ctx.font = '13px sans-serif'
+          ctx.fillText(className, x + 3, y - 4)
+
+          // ========= 第二步：绘制标注框 + 高亮填充 =========
+          ctx.strokeStyle = baseColor
+          ctx.lineWidth = isHighlight ? 3 : 2
+          ctx.strokeRect(x, y, bw, bh)
+
+          // 高亮：增加半透明填充（33代表20%透明度）
+          if (isHighlight) {
+            ctx.fillStyle = baseColor + '33'
+            ctx.fillRect(x, y, bw, bh)
+          }
         })
       }
       img.src = this.fullUrl(this.selectedImage.url)
@@ -988,6 +1148,53 @@ export default {
         this.$message.error("上传失败")
       } finally {
         this.uploadLoading = false
+      }
+    },
+
+    // 单张图片下载
+    async downloadSingleImage(img) {
+      try {
+        const url = this.fullUrl(img.url)
+        // 请求图片转为blob
+        const res = await fetch(url, {
+          mode: 'cors',
+          credentials: 'include'
+        })
+        const blob = await res.blob()
+        const blobUrl = URL.createObjectURL(blob)
+
+        const a = document.createElement('a')
+        a.href = blobUrl
+        a.download = img.filename
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+
+        // 释放内存
+        URL.revokeObjectURL(blobUrl)
+        this.$message.success('开始下载')
+      } catch (err) {
+        console.error('下载失败', err)
+        // 降级方案：打开图片页面，用户手动保存
+        window.open(this.fullUrl(img.url), '_blank')
+        this.$message.warning('自动下载失败，请在新页面右键图片另存')
+      }
+    },
+
+    // 删除单张图片
+    async deleteSingleImage(img) {
+      try {
+        await this.$confirm(`确认删除【${img.filename}】，图片及所有标注将会被清除！`, '警告', {type: 'warning'})
+        // 用户点击确认，执行删除请求
+        await this.$axios.delete(`/api/dataset/${this.dataset.id}/image/${img.filename}`)
+        this.$message.success('删除成功')
+        this.loadImagePage()
+      } catch (e) {
+        // ElementUI 的 confirm 取消会 reject，判断是否是用户取消
+        if (e !== 'cancel') {
+          this.$message.error('删除失败，请检查接口或权限')
+          console.error('删除图片报错：', e)
+        }
       }
     },
   }
@@ -1215,11 +1422,18 @@ export default {
 }
 
 .grid-card {
+  position: relative;
   border: 1px solid #e3e8ef;
   border-radius: 12px;
   overflow: hidden;
   background: #fff;
   cursor: pointer;
+  transition: 0.2s ease all;
+}
+
+.grid-card:hover {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  border-color: #c0d8f5;
 }
 
 .grid-card.active {
@@ -1231,12 +1445,40 @@ export default {
   width: 100%;
   height: 160px;
   background: #f2f6fb;
+  position: relative;
 }
 
 .grid-canvas {
   width: 100%;
   height: 100%;
   display: block;
+}
+
+/* hover浮现操作按钮 */
+.grid-card-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.action-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  background: #ffffffdd;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.action-btn:hover {
+  background: #ffffff;
+}
+
+.action-btn.danger {
+  color: #f56c6c;
 }
 
 .card-footer {
@@ -1566,96 +1808,150 @@ export default {
 .image-modal {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.75);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 999;
-  padding: 20px;
+  padding: 24px;
+  backdrop-filter: blur(2px);
 }
 
 .modal-inner {
-  width: min(1100px, 100%);
+  width: min(1160px, 100%);
   max-height: 92vh;
   background: #fff;
-  border-radius: 14px;
+  border-radius: 16px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
 }
 
 .modal-header {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 16px 20px;
-  border-bottom: 1px solid #eee;
+  padding: 16px 24px;
+  border-bottom: 1px solid #f0f2f6;
+  background-color: #fcfcfd;
+}
+
+.modal-header strong {
+  font-size: 15px;
+  color: #1d2129;
+}
+
+.modal-header > span {
+  font-size: 13px;
+  color: #6e7681;
 }
 
 .close-btn {
   margin-left: auto;
   border: none;
-  background: transparent;
-  font-size: 20px;
+  background: #f2f3f5;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 18px;
   cursor: pointer;
+  color: #4e5969;
+  transition: background 0.2s;
+}
+
+.close-btn:hover {
+  background: #e5e6eb;
 }
 
 .modal-canvas-wrap {
   flex: 1;
   overflow: auto;
-  background: #f2f6fb;
-  padding: 16px;
+  background: #f7f8fa;
+  padding: 20px;
   text-align: center;
+}
+
+.modal-canvas-wrap::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.modal-canvas-wrap::-webkit-scrollbar-thumb {
+  background: #d0d3d9;
+  border-radius: 3px;
 }
 
 .viewer-canvas {
   max-width: 100%;
   height: auto;
   display: inline-block;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .split-tag {
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: 999px;
-  background: #eef5ff;
-  color: #409eff;
+  background: #e8f3ff;
+  color: #2979e2;
   font-size: 12px;
+  font-weight: 500;
 }
 
 .annotation-table {
-  padding: 16px 20px;
-  border-top: 1px solid #eee;
+  padding: 16px 24px;
+  border-top: 1px solid #f0f2f6;
   max-height: 260px;
   overflow-y: auto;
+  background: #fcfcfd;
+}
+
+.annotation-table::-webkit-scrollbar {
+  width: 6px;
+}
+
+.annotation-table::-webkit-scrollbar-thumb {
+  background: #d0d3d9;
+  border-radius: 3px;
 }
 
 .table-head {
-  padding-bottom: 10px;
-  font-weight: bold;
+  padding-bottom: 12px;
+  font-weight: 600;
+  font-size: 14px;
+  color: #1d2129;
 }
 
 .ann-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 16px;
-  padding: 8px 0;
+  gap: 10px 18px;
+  padding: 9px 10px;
   font-size: 13px;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.ann-row:hover {
+  background-color: #f2f3f5;
 }
 
 .ann-row i {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .warnings {
-  margin: 0 20px 16px;
-  padding: 10px 14px;
-  border-radius: 8px;
+  margin: 0 24px 16px;
+  padding: 12px 16px;
+  border-radius: 10px;
   background: #fff7e6;
   color: #b88230;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 @media (max-width: 900px) {
@@ -1693,6 +1989,42 @@ export default {
   .chart-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* 底部切换栏 */
+.viewer-bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 12px 24px;
+  border-top: 1px solid #f0f2f6;
+  background: #fcfcfd;
+}
+
+.switch-btn {
+  padding: 6px 16px;
+  border-radius: 8px;
+  border: 1px solid #dcdfe6;
+  background: #fff;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.switch-btn:disabled {
+  color: #c0c4cc;
+  background: #f5f7fa;
+  cursor: not-allowed;
+}
+
+.page-indicator {
+  font-size: 13px;
+  color: #666;
+}
+
+/* 标注明细激活高亮行 */
+.ann-row.active {
+  background-color: #e8f3ff;
 }
 
 /* Images页面新增上传区域 */
