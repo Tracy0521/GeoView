@@ -251,8 +251,8 @@
           :key="cls.class_id"
           class="class-tag"
       >
-        <span class="color-dot-small" :style="{background:getClassColor(cls.class_id)}"></span>
-        {{ cls.name }}<sup>{{ cls.count }}</sup>
+      <span class="color-dot-small" :style="{background:getClassColor(cls.class_id)}"></span>
+      {{ classNameCnMap[cls.class_id] || cls.name }}<sup>{{ cls.count }}</sup>
       </span>
     </span>
                 <span v-if="!img.class_list || img.class_list.length === 0">-</span>
@@ -363,7 +363,7 @@
               <span class="color-dot" :style="{background:getClassColor(c.class_id)}"></span>
               {{ c.class_id }}
             </td>
-            <td>{{ c.name }}</td>
+            <td>{{ classNameCnMap[c.class_id] || c.name }}</td>
             <td>{{ c.annotation_count }}</td>
             <td>{{ c.image_count || 0 }}</td>
           </tr>
@@ -445,7 +445,7 @@
           >
             <i :style="{ background: getBoxColor(ann.class_id) }"/>
             <span>类别 #{{ ann.class_id }}</span>
-            <span>{{ classNameMap[ann.class_id] || '未知类别' }}</span>
+            <span>{{ classNameCnMap[ann.class_id] || classNameMap[ann.class_id] || '未知类别' }}</span>
             <span>{{ categoryLabel(ann.class_id) }}</span>
             <span>x={{ ann.x.toFixed(4) }} y={{ ann.y.toFixed(4) }}</span>
             <span>w={{ ann.w.toFixed(4) }} h={{ ann.h.toFixed(4) }}</span>
@@ -479,6 +479,35 @@ export default {
   name: 'DatasetDetail',
   data() {
     return {
+      // ====== 新增中文映射 ======
+      classNameCnMap: {
+        0: "航母",
+        1: "两栖舰",
+        2: "驱护舰",
+        3: "民船",
+        4: "SU-35",
+        5: "C-130",
+        6: "C-17",
+        7: "C-5",
+        8: "F-16",
+        9: "TU-160",
+        10: "E-3",
+        11: "B-52",
+        12: "P-3C",
+        13: "B-1B",
+        14: "E-8",
+        15: "TU-22",
+        16: "F-15",
+        17: "KC-135",
+        18: "F-22",
+        19: "FA-18",
+        20: "TU-95",
+        21: "KC-10",
+        22: "SU-34",
+        23: "SU-24",
+        24: "发射车"
+      },
+      // ====== 新增结束 ======
       dataset: null,
       keyword: '',
       selectedImage: null,
@@ -489,9 +518,9 @@ export default {
       // Tab 配置
       activeTab: 'images',
       tabList: [
-        {label: 'Images', value: 'images'},
-        {label: 'Classes', value: 'classes'},
-        {label: 'Charts', value: 'charts'}
+        {label: '影像', value: 'images'},
+        {label: '类别', value: 'classes'},
+        {label: '图表', value: 'charts'}
       ],
 
       // 视图控制
@@ -907,7 +936,7 @@ export default {
           // 判断是否为高亮条目
           const isHighlight = this.highlightAnnIndex === idx
           const baseColor = this.getBoxColor(ann.class_id)
-          const className = this.classNameMap[ann.class_id] || 'unknown'
+          const className = this.classNameCnMap[ann.class_id] || this.classNameMap[ann.class_id] || 'unknown'
 
           // ========= 第一步：先绘制标签（置顶，防止被遮挡） =========
           const textH = 18
