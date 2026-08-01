@@ -251,8 +251,8 @@
           :key="cls.class_id"
           class="class-tag"
       >
-        <span class="color-dot-small" :style="{background:getClassColor(cls.class_id)}"></span>
-        {{ cls.name }}<sup>{{ cls.count }}</sup>
+      <span class="color-dot-small" :style="{background:getClassColor(cls.class_id)}"></span>
+      {{ classNameCnMap[cls.class_id] || cls.name }}<sup>{{ cls.count }}</sup>
       </span>
     </span>
                 <span v-if="!img.class_list || img.class_list.length === 0">-</span>
@@ -363,7 +363,7 @@
               <span class="color-dot" :style="{background:getClassColor(c.class_id)}"></span>
               {{ c.class_id }}
             </td>
-            <td>{{ c.name }}</td>
+            <td>{{ classNameCnMap[c.class_id] || c.name }}</td>
             <td>{{ c.annotation_count }}</td>
             <td>{{ c.image_count || 0 }}</td>
           </tr>
@@ -445,7 +445,7 @@
           >
             <i :style="{ background: getBoxColor(ann.class_id) }"/>
             <span>类别 #{{ ann.class_id }}</span>
-            <span>{{ classNameMap[ann.class_id] || '未知类别' }}</span>
+            <span>{{ classNameCnMap[ann.class_id] || classNameMap[ann.class_id] || '未知类别' }}</span>
             <span>{{ categoryLabel(ann.class_id) }}</span>
             <span>x={{ ann.x.toFixed(4) }} y={{ ann.y.toFixed(4) }}</span>
             <span>w={{ ann.w.toFixed(4) }} h={{ ann.h.toFixed(4) }}</span>
@@ -479,6 +479,35 @@ export default {
   name: 'DatasetDetail',
   data() {
     return {
+      // ====== 新增中文映射 ======
+      classNameCnMap: {
+        0: "航母",
+        1: "两栖舰",
+        2: "驱护舰",
+        3: "民船",
+        4: "SU-35",
+        5: "C-130",
+        6: "C-17",
+        7: "C-5",
+        8: "F-16",
+        9: "TU-160",
+        10: "E-3",
+        11: "B-52",
+        12: "P-3C",
+        13: "B-1B",
+        14: "E-8",
+        15: "TU-22",
+        16: "F-15",
+        17: "KC-135",
+        18: "F-22",
+        19: "FA-18",
+        20: "TU-95",
+        21: "KC-10",
+        22: "SU-34",
+        23: "SU-24",
+        24: "发射车"
+      },
+      // ====== 新增结束 ======
       dataset: null,
       keyword: '',
       selectedImage: null,
@@ -489,9 +518,9 @@ export default {
       // Tab 配置
       activeTab: 'images',
       tabList: [
-        {label: 'Images', value: 'images'},
-        {label: 'Classes', value: 'classes'},
-        {label: 'Charts', value: 'charts'}
+        {label: '影像', value: 'images'},
+        {label: '类别', value: 'classes'},
+        {label: '图表', value: 'charts'}
       ],
 
       // 视图控制
@@ -529,6 +558,7 @@ export default {
 
       // 图表相关变量
       datasetStats: {},
+      chartLoading: false, // 新增
       charts: {
         classBar: null,
         splitPie: null,
@@ -632,24 +662,38 @@ export default {
         this.loadDatasetBase()
       }
     },
-    activeTab(newTab) {
+    async activeTab(newTab) {
       this.selectedImage = null
-      this.destroyAllCharts()
+      // 离开charts标签，销毁实例
+      if (this.activeTab === 'charts' && newTab !== 'charts') {
+        this.destroyAllCharts()
+      }
+
       if (newTab === 'images') {
         this.loadImagePage()
       }
       if (newTab === 'classes') {
-        this.loadClassData().then(() => {
-          setTimeout(() => {
-            this.renderClassDistributionChart()
-          }, 120)
+        await this.loadClassData()
+        this.$nextTick(() => {
+          this.renderClassDistributionChart()
         })
       }
       if (newTab === 'charts') {
-        this.$nextTick(() => this.renderAllCharts())
+        await this.$nextTick()
+        await this.loadChartStatistics()
+        this.destroyAllCharts()
+        this.$nextTick(async () => {
+          this.renderAllCharts()
+          // 加长延时，双层延时保证DOM布局稳定
+          setTimeout(() => {
+            Object.values(this.charts).forEach(ins => {
+              if (ins) ins.resize()
+            })
+          }, 60)
+        })
       }
     },
-    // 切换到编辑模式自动聚焦输入框
+    // 下方所有watch保留不动
     editDesc(newVal) {
       if (newVal) {
         this.$nextTick(() => {
@@ -907,7 +951,7 @@ export default {
           // 判断是否为高亮条目
           const isHighlight = this.highlightAnnIndex === idx
           const baseColor = this.getBoxColor(ann.class_id)
-          const className = this.classNameMap[ann.class_id] || 'unknown'
+          const className = this.classNameCnMap[ann.class_id] || this.classNameMap[ann.class_id] || 'unknown'
 
           // ========= 第一步：先绘制标签（置顶，防止被遮挡） =========
           const textH = 18
@@ -960,21 +1004,32 @@ export default {
       })
     },
 
-    addClass() {
+    // 新增类别
+    async addClass() {
       const name = this.newClassName.trim()
       if (!name) {
         this.$message.warning("类别名称不能为空")
         return
       }
-      // 发起请求逻辑
-      axios.post(`/api/dataset/${this.dataset.id}/classes`, {
-        class_id: 自动分配ID,
-        name: name
-      }).then(res => {
+      // 简单方案：取现有最大class_id +1
+      const maxId = this.classList.reduce((max, item) => Math.max(max, item.class_id), -1)
+      const newClassId = maxId + 1
+      try {
+        await axios.post(`/api/dataset/${this.dataset.id}/classes`, {
+          class_id: newClassId,
+          name: name
+        })
         this.newClassName = ""
         // 重新刷新类别列表
-        this.loadClassData()
-      })
+        await this.loadClassData()
+        // 如果当前在classes标签页，重新渲染图表
+        if (this.activeTab === 'classes') {
+          setTimeout(() => this.renderClassDistributionChart(), 100)
+        }
+      } catch (err) {
+        console.error(err)
+        this.$message.error("新增类别失败")
+      }
     },
 
     doExport() {
@@ -1008,10 +1063,19 @@ export default {
     },
 
     renderAllCharts() {
-      this.renderSplitPieChart()
-      this.renderTopClassPieChart()
-      this.renderObjPerImageChart()
-      this.renderImageSizeChart()
+      const taskList = [
+        this.renderSplitPieChart.bind(this),
+        this.renderTopClassPieChart.bind(this),
+        this.renderImageSizeChart.bind(this),
+        this.renderObjPerImageChart.bind(this)
+      ]
+      taskList.forEach(fn => {
+        try {
+          fn()
+        } catch (e) {
+          console.error('图表渲染异常', fn.name, e)
+        }
+      })
     },
 
     renderSplitPieChart() {
@@ -1019,8 +1083,8 @@ export default {
       if (!dom) return
       disposeChart(this.charts.splitPie)
       const chartIns = echarts.init(dom)
-      const {train_count = 0, val_count = 0} = this.datasetStats
-      const option = getSplitPieOption(train_count, val_count)
+      const {train = 0, val = 0} = this.datasetStats
+      const option = getSplitPieOption(train, val)
       chartIns.setOption(option)
       this.charts.splitPie = chartIns
     },
@@ -1197,8 +1261,43 @@ export default {
         }
       }
     },
+
+    // 加载图表统计数据（Train/Val、类别分布、尺寸分布）
+    async loadChartStatistics() {
+      if (this.chartLoading) return
+      this.chartLoading = true
+      try {
+        const url = `${global.BASEURL}/api/dataset/${this.dataset.id}/chart-stat`
+        const res = await axios.get(url)
+        console.log("【图表原始数据】", res.data.data)
+        const raw = res.data.data || {}
+
+        // ✅ 字段映射：统一后端返回字段名为前端使用的字段名
+        this.datasetStats = {
+          ...raw,
+          // 单图标注数量分布：box_distribution → object_count_list
+          object_count_list: raw.box_distribution || [],
+          // 图片尺寸分布：width_data/height_data → width_list/height_list
+          width_list: raw.width_data || [],
+          height_list: raw.height_data || [],
+          // Top Classes 数据备份
+          top_classes: raw.top_classes || []
+        }
+
+        console.log("【映射后数据】", this.datasetStats)
+      } catch (err) {
+        console.error("加载图表统计失败", err)
+        this.datasetStats = {}
+      } finally {
+        this.chartLoading = false
+      }
+    },
+
+    // methods底部
   }
 }
+
+
 </script>
 
 <style scoped>
@@ -1727,9 +1826,9 @@ export default {
 .chart-box {
   width: 100%;
   height: 320px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  //display: flex;
+  //align-items: center;
+  //justify-content: center;
   color: #999;
 }
 
