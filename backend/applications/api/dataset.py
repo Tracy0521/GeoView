@@ -36,15 +36,15 @@ _lock = threading.Lock()
 
 # ── 赛题 25 类 YOLO 遥感数据集常量 ──────────────────────────────
 NUM_CLASSES = 25
-SHIP_CLASS_IDS = set(range(0, 4))       # 0-3 舰船
+SHIP_CLASS_IDS = set(range(0, 4))  # 0-3 舰船
 AIRPLANE_CLASS_IDS = set(range(4, 24))  # 4-23 飞机
-LAUNCHER_CLASS_ID = 24                  # 24 发射车
+LAUNCHER_CLASS_ID = 24  # 24 发射车
 VALID_CLASS_IDS = set(range(NUM_CLASSES))
 
 IMAGE_EXTENSIONS = {'.tif', '.tiff', '.png', '.jpg', '.jpeg'}
 LABEL_EXTENSION = '.txt'
-MAX_IMAGE_SIZE = 100 * 1024 * 1024          # 单图 100MB
-MAX_ZIP_SIZE = 10 * 1024 * 1024 * 1024      # 压缩包 10GB
+MAX_IMAGE_SIZE = 100 * 1024 * 1024  # 单图 100MB
+MAX_ZIP_SIZE = 10 * 1024 * 1024 * 1024  # 压缩包 10GB
 
 
 def _root():
@@ -332,7 +332,8 @@ def _build_image_dict(img_model: DatasetImage):
     }
 
 
-def _add_image_record(dataset_id: str, full_img_path: str, image_filename: str, annotations: list, warnings: list, file_size: int):
+def _add_image_record(dataset_id: str, full_img_path: str, image_filename: str, annotations: list, warnings: list,
+                      file_size: int):
     """
     【新版数据库写入核心函数，替代旧版_add_image_to_dataset】
     1. 写入dataset_image主记录
@@ -612,6 +613,7 @@ from datetime import datetime, timedelta
 _stats_cache = None
 _stats_expire = None
 
+
 @dataset_api.get("/stats")
 def global_stats():
     global _stats_cache, _stats_expire
@@ -640,6 +642,7 @@ def global_stats():
 
 
 from sqlalchemy.orm import joinedload
+
 
 @dataset_api.get('/samples')
 def sample_images():
@@ -1097,3 +1100,90 @@ def add_single_class(dataset_id):
     db.session.add(new_cls)
     db.session.commit()
     return success_api(msg="类别添加成功")
+
+
+# ====================== 图表统计接口（新增，用于chart页面四张图表）======================
+from sqlalchemy import func
+
+
+@dataset_api.get("/<dataset_id>/chart-stat")
+def get_dataset_chart_stat(dataset_id):
+    ds = Dataset.query.get(dataset_id)
+    if not ds:
+        return fail_api("数据集不存在")
+
+    # 清除session缓存
+    db.session.expire_all()
+
+    # 1. 统计Train / Val 划分数量【增加数据集过滤】
+    split_result = db.session.query(
+        DatasetImage.split,
+        func.count(DatasetImage.id)
+    ).filter(DatasetImage.dataset_id == dataset_id) \
+        .group_by(DatasetImage.split).all()
+
+    # 打印日志，后端控制台直接看到查询结果
+    print("split查询结果：", split_result)
+
+    train_count = 0
+    val_count = 0
+    for split_type, cnt in split_result:
+        print(f"split:{split_type}, count:{cnt}")
+        if split_type == "train":
+            train_count = cnt
+        elif split_type == "val":
+            val_count = cnt
+
+    # =========下面代码保持原样=========
+    # 2. Top Classes：每个类别标注数量（环形图）
+    class_anno_stat = db.session.query(
+        DatasetAnnotation.class_id,
+        func.count(DatasetAnnotation.id).label("cnt")
+    ).join(DatasetImage) \
+        .filter(DatasetImage.dataset_id == dataset_id) \
+        .group_by(DatasetAnnotation.class_id).all()
+
+    # 绑定类别名称
+    class_name_map = {}
+    class_rows = DatasetClass.query.filter_by(dataset_id=dataset_id).all()
+    for r in class_rows:
+        class_name_map[r.class_id] = r.name
+    top_class_list = []
+    for cid, cnt in class_anno_stat:
+        top_class_list.append({
+            "name": class_name_map.get(cid, f"class_{cid}"),
+            "value": cnt
+        })
+
+    # 3. 图片尺寸分布（收集所有图片宽高）
+    size_rows = db.session.query(ImageInfo.width, ImageInfo.height) \
+        .join(DatasetImage) \
+        .filter(DatasetImage.dataset_id == dataset_id).all()
+    width_list = []
+    height_list = []
+    for w, h in size_rows:
+        if w and h:
+            width_list.append(w)
+            height_list.append(h)
+
+    # 4. 单图标注数量分布
+    anno_per_img = db.session.query(
+        func.count(DatasetAnnotation.id).label("box_num")
+    ).join(DatasetImage) \
+        .filter(DatasetImage.dataset_id == dataset_id) \
+        .group_by(DatasetAnnotation.image_id).all()
+    box_distribute = {}
+    for (box_num,) in anno_per_img:
+        box_distribute[box_num] = box_distribute.get(box_num, 0) + 1
+    box_dist_list = [{"box": k, "count": v} for k, v in box_distribute.items()]
+
+    resp_data = {
+        "train": train_count,
+        "val": val_count,
+        "top_classes": top_class_list,
+        "width_data": width_list,
+        "height_data": height_list,
+        "box_distribution": box_dist_list
+    }
+    print("返回给前端train/val：", train_count, val_count)
+    return success_api(data=resp_data)

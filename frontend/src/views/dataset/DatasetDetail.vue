@@ -558,6 +558,7 @@ export default {
 
       // 图表相关变量
       datasetStats: {},
+      chartLoading: false, // 新增
       charts: {
         classBar: null,
         splitPie: null,
@@ -661,24 +662,40 @@ export default {
         this.loadDatasetBase()
       }
     },
-    activeTab(newTab) {
+    async activeTab(newTab) {
       this.selectedImage = null
-      this.destroyAllCharts()
+      // 切换离开charts页面，立刻销毁所有图表实例
+      if (this.activeTab === 'charts' && newTab !== 'charts') {
+        this.destroyAllCharts()
+      }
+
       if (newTab === 'images') {
         this.loadImagePage()
       }
       if (newTab === 'classes') {
-        this.loadClassData().then(() => {
-          setTimeout(() => {
-            this.renderClassDistributionChart()
-          }, 120)
+        await this.loadClassData()
+        this.$nextTick(() => {
+          this.renderClassDistributionChart()
         })
       }
       if (newTab === 'charts') {
-        this.$nextTick(() => this.renderAllCharts())
+        // 先等待DOM渲染完成（v-if重建容器）
+        await this.$nextTick()
+        // 请求统计接口
+        await this.loadChartStatistics()
+        // 销毁残留实例
+        this.destroyAllCharts()
+        // 渲染图表
+        this.renderAllCharts()
+        // 延时resize，确保容器完全渲染完成
+        setTimeout(() => {
+          Object.values(this.charts).forEach(ins => {
+            if (ins) ins.resize()
+          })
+        }, 120)
       }
     },
-    // 切换到编辑模式自动聚焦输入框
+    // 下方所有watch保留不动
     editDesc(newVal) {
       if (newVal) {
         this.$nextTick(() => {
@@ -989,21 +1006,32 @@ export default {
       })
     },
 
-    addClass() {
+    // 新增类别
+    async addClass() {
       const name = this.newClassName.trim()
       if (!name) {
         this.$message.warning("类别名称不能为空")
         return
       }
-      // 发起请求逻辑
-      axios.post(`/api/dataset/${this.dataset.id}/classes`, {
-        class_id: 自动分配ID,
-        name: name
-      }).then(res => {
+      // 简单方案：取现有最大class_id +1
+      const maxId = this.classList.reduce((max, item) => Math.max(max, item.class_id), -1)
+      const newClassId = maxId + 1
+      try {
+        await axios.post(`/api/dataset/${this.dataset.id}/classes`, {
+          class_id: newClassId,
+          name: name
+        })
         this.newClassName = ""
         // 重新刷新类别列表
-        this.loadClassData()
-      })
+        await this.loadClassData()
+        // 如果当前在classes标签页，重新渲染图表
+        if (this.activeTab === 'classes') {
+          setTimeout(() => this.renderClassDistributionChart(), 100)
+        }
+      } catch (err) {
+        console.error(err)
+        this.$message.error("新增类别失败")
+      }
     },
 
     doExport() {
@@ -1037,10 +1065,19 @@ export default {
     },
 
     renderAllCharts() {
-      this.renderSplitPieChart()
-      this.renderTopClassPieChart()
-      this.renderObjPerImageChart()
-      this.renderImageSizeChart()
+      const taskList = [
+        this.renderSplitPieChart.bind(this),
+        this.renderTopClassPieChart.bind(this),
+        this.renderImageSizeChart.bind(this),
+        this.renderObjPerImageChart.bind(this)
+      ]
+      taskList.forEach(fn => {
+        try {
+          fn()
+        } catch (e) {
+          console.error('图表渲染异常', fn.name, e)
+        }
+      })
     },
 
     renderSplitPieChart() {
@@ -1048,8 +1085,8 @@ export default {
       if (!dom) return
       disposeChart(this.charts.splitPie)
       const chartIns = echarts.init(dom)
-      const {train_count = 0, val_count = 0} = this.datasetStats
-      const option = getSplitPieOption(train_count, val_count)
+      const {train = 0, val = 0} = this.datasetStats
+      const option = getSplitPieOption(train, val)
       chartIns.setOption(option)
       this.charts.splitPie = chartIns
     },
@@ -1226,8 +1263,29 @@ export default {
         }
       }
     },
+
+    // 加载图表统计数据（Train/Val、类别分布、尺寸分布）
+    async loadChartStatistics() {
+      if (this.chartLoading) return
+      this.chartLoading = true
+      try {
+        const url = `${global.BASEURL}/api/dataset/${this.dataset.id}/chart-stat`
+        const res = await axios.get(url)
+        console.log("【图表原始数据】", res.data.data)
+        this.datasetStats = res.data.data || {}
+      } catch (err) {
+        console.error("加载图表统计失败", err)
+        this.datasetStats = {}
+      } finally {
+        this.chartLoading = false
+      }
+    },
+
+    // methods底部
   }
 }
+
+
 </script>
 
 <style scoped>
