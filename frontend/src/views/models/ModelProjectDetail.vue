@@ -11,6 +11,7 @@
       <button :class="{active:activeView==='charts'}" @click="switchView('charts')">指标对比</button>
       <button :class="{active:activeView==='ranking'}" @click="switchView('ranking')">数据排行</button>
       <button :class="{active:activeView==='classAnalysis'}" @click="switchView('classAnalysis')">类别分析</button>
+      <button :class="{active:activeView==='diagnosis'}" @click="switchView('diagnosis')">错误诊断</button>
     </nav>
 
     <div v-show="activeView==='charts'" class="charts-view">
@@ -25,6 +26,7 @@
           <i :style="{background: colors[index % colors.length]}" />
           <span class="model-info" title="点击修改模型" @click.prevent.stop="openEdit(model)"><strong>{{ model.name }}</strong><small>{{ model.score ? model.score + ' 分 · ' : '' }}{{ formatSize(model.size) }}</small><small v-if="model.source_type==='remote'" class="source-meta">{{ model.source_server }} · 已同步<span v-if="model.metrics&&model.metrics.class_names"> · {{ model.metrics.class_names.length }} 类</span><br>{{ model.remote_path }}</small></span>
           <button class="edit-button" title="修改模型" @click.prevent.stop="openEdit(model)">✎</button>
+          <button class="detail-button" title="查看模型详情" @click.prevent.stop="openDetail(model)">ⓘ</button>
           <button title="删除模型" @click.prevent.stop="remove(model)">×</button>
         </label>
         <div class="upload-box" @click="openUploadDialog"><b>⇧</b><span>添加已训练模型</span><small>本地上传 / 远程服务器</small></div>
@@ -62,6 +64,7 @@
     </section>
 
     <ClassMetricAnalysis v-show="activeView==='classAnalysis'" :models="projectModels" :colors="colors" />
+    <ErrorDiagnosisCenter v-if="activeView==='diagnosis'" :models="projectModels" @refresh="load" />
 
     <el-dialog v-model="uploadVisible" title="增加已训练模型" width="720px" :close-on-click-modal="false">
       <p class="dialog-note">这里只保存已经完成训练的模型，不提供云训练功能。</p>
@@ -75,6 +78,9 @@
         <el-form-item label="模型文件"><input ref="modelFile" type="file" accept=".pt,.pth,.pdparams,.onnx" @change="pickModel"><div v-if="uploadForm.file" class="file-name">{{ uploadForm.file.name }} · {{ formatSize(uploadForm.file.size) }}</div></el-form-item>
         <el-form-item label="训练结果 results.csv（推荐）"><input type="file" accept=".csv,text/csv" @change="pickResultsCsv"><div v-if="uploadForm.metricsFile" class="file-name">{{ uploadForm.metricsFile.name }} · 将自动读取精确率、召回率、mAP 和损失曲线</div><small class="field-help">请选择 Ultralytics 训练输出目录中的 results.csv。</small></el-form-item>
         <el-form-item label="指标 JSON（可多选，自动合并）"><el-input v-model="uploadForm.metrics" type="textarea" :rows="5" placeholder='{"small_sample":[...],"class_metrics":[...]}' /><input type="file" accept=".json,application/json" multiple @change="loadMetricsFile"><small class="field-help">可以同时选择小样本 JSON 和类别指标 JSON，系统会按顶层字段自动合并；缺少 F1 时会自动计算。</small></el-form-item>
+        <div class="form-row"><el-form-item label="数据版本"><el-input v-model="uploadForm.datasetVersion" placeholder="例如：DOTA-v1.5" /></el-form-item><el-form-item label="标签"><el-input v-model="uploadForm.tags" placeholder="轻量化, 小目标, 基线" /></el-form-item></div>
+        <el-form-item label="训练配置 JSON / YAML"><el-input v-model="uploadForm.trainingConfig" type="textarea" :rows="4" placeholder='{"imgsz":1024,"batch":8,"optimizer":"AdamW"}' /><input type="file" accept=".json,.yaml,.yml" @change="loadTrainingConfigFile($event,uploadForm)" /><small class="field-help">支持直接上传训练输出中的 args.yaml 或配置 JSON。</small></el-form-item>
+        <el-form-item label="备注"><el-input v-model="uploadForm.notes" type="textarea" :rows="2" maxlength="2000" /></el-form-item>
       </el-form>
       <div v-else class="remote-source">
         <div class="remote-toolbar"><div><strong>远程训练结果</strong><small>仅扫描 output/*/weights/best.pt</small></div><el-button size="small" :loading="remoteLoading" @click="loadRemoteModels">刷新</el-button></div>
@@ -109,8 +115,20 @@
         <div class="form-row"><el-form-item label="训练日期"><el-date-picker v-model="editForm.trainingDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" /></el-form-item><el-form-item label="训练轮数"><el-input v-model="editForm.trainingEpochs" type="number" min="1" step="1" placeholder="例如：100" /></el-form-item></div>
         <el-form-item label="重新导入 results.csv（可选）"><input type="file" accept=".csv,text/csv" @change="pickEditResultsCsv"><div v-if="editForm.metricsFile" class="file-name">{{ editForm.metricsFile.name }} · 将更新训练曲线</div></el-form-item>
         <el-form-item label="指标 JSON（可多选，自动合并）"><el-input v-model="editForm.metrics" type="textarea" :rows="8" /><input type="file" accept=".json,application/json" multiple @change="loadEditMetricsFile"><small class="field-help">可同时选择 small_sample 和 class_metrics 两个 JSON，合并后仍可直接修改内容。</small></el-form-item>
+        <div class="form-row"><el-form-item label="数据版本"><el-input v-model="editForm.datasetVersion" /></el-form-item><el-form-item label="标签"><el-input v-model="editForm.tags" placeholder="逗号分隔" /></el-form-item></div>
+        <el-form-item label="训练配置 JSON / YAML"><el-input v-model="editForm.trainingConfig" type="textarea" :rows="5" /><input type="file" accept=".json,.yaml,.yml" @change="loadTrainingConfigFile($event,editForm)" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="editForm.notes" type="textarea" :rows="3" maxlength="2000" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="editVisible=false">取消</el-button><el-button type="primary" :loading="editing" @click="saveEdit">保存修改</el-button></template>
+    </el-dialog>
+    <el-dialog v-model="detailVisible" title="模型详情" width="720px">
+      <div v-if="detailModel" class="model-detail-card">
+        <header><div><h2>{{ detailModel.name }}</h2><p>{{ detailModel.framework }} · {{ formatSize(detailModel.size) }}</p></div><div class="detail-tags"><span v-for="tag in modelDetail(detailModel).tags" :key="tag">{{ tag }}</span></div></header>
+        <div class="detail-grid"><div><small>数据版本</small><strong>{{ modelDetail(detailModel).dataset_version || '未填写' }}</strong></div><div><small>训练轮数</small><strong>{{ modelEpochs(detailModel) || '—' }}</strong></div><div class="hash"><small>权重 SHA-256</small><strong>{{ modelDetail(detailModel).weight_hash || '尚未生成' }}</strong></div></div>
+        <section><h3>训练配置</h3><pre>{{ prettyConfig(detailModel) }}</pre></section>
+        <section><h3>备注</h3><p>{{ modelDetail(detailModel).notes || '暂无备注' }}</p></section>
+      </div>
+      <template #footer><el-button @click="detailVisible=false">关闭</el-button><el-button type="primary" @click="detailVisible=false;openEdit(detailModel)">编辑资料</el-button></template>
     </el-dialog>
   </main>
 </template>
@@ -119,10 +137,12 @@
 import MetricChart from '@/components/MetricChart.vue'
 import SmallSampleChart from '@/components/SmallSampleChart.vue'
 import ClassMetricAnalysis from '@/components/ClassMetricAnalysis.vue'
+import ErrorDiagnosisCenter from '@/components/ErrorDiagnosisCenter.vue'
+import YAML from 'yaml'
 import { addModel, generateRemoteClassMetrics, getProject, getRemoteClassMetricsStatus, getRemoteModels, importRemoteModel, removeModel, updateModel } from '@/api/modelRank'
 export default {
-  name: 'ModelProjectDetail', components: { MetricChart, SmallSampleChart, ClassMetricAnalysis },
-  data: () => ({ project:null, activeView:'charts', keyword:'', selected:[], rankingSortKey:'map5095', rankingSortDirection:'desc', rankingPage:1, rankingPageSize:10, uploadVisible:false, uploading:false, uploadSource:'local', remoteLoading:false, remoteServers:[], remoteModels:[], selectedRemoteKey:'', validationServerId:'', validationDatasetPath:'', validationLaunching:false, validationStatus:{running:false,status:{}}, validationError:'', validationPollTimer:null, editVisible:false, editing:false, colors:['#18a4c4','#8b5bd9','#ed8b2f','#35a86c','#ec5269','#527ce8'], open:{metrics:true,loss:true}, uploadForm:{name:'',framework:'PyTorch',score:'',file:null,metricsFile:null,metrics:''}, editForm:{id:'',name:'',framework:'PyTorch',score:'',trainingDate:'',trainingEpochs:'',metricsFile:null,metrics:''}, baseRankingColumns:[{key:'name',label:'模型',type:'model'},{key:'framework',label:'框架',type:'text'},{key:'precision',label:'精确率',type:'metric'},{key:'recall',label:'召回率',type:'metric'},{key:'map50',label:'mAP@50',type:'metric'},{key:'map5095',label:'mAP@50-95',type:'metric'}], trailingRankingColumns:[{key:'score',label:'得分',type:'text'},{key:'epochs',label:'轮数',type:'text'},{key:'date',label:'日期',type:'text'}], metricCharts:[{key:'precision',title:'精确率（Precision）'},{key:'recall',title:'召回率（Recall）'},{key:'map50',title:'mAP@50'},{key:'map5095',title:'mAP@50-95'}], lossCharts:[{key:'box_loss',title:'定位损失（box_loss）'},{key:'cls_loss',title:'分类损失（cls_loss）'},{key:'dfl_loss',title:'分布焦点损失（dfl_loss）'}] }),
+  name: 'ModelProjectDetail', components: { MetricChart, SmallSampleChart, ClassMetricAnalysis, ErrorDiagnosisCenter },
+  data: () => ({ project:null, activeView:'charts', keyword:'', selected:[], rankingSortKey:'map5095', rankingSortDirection:'desc', rankingPage:1, rankingPageSize:10, uploadVisible:false, uploading:false, uploadSource:'local', remoteLoading:false, remoteServers:[], remoteModels:[], selectedRemoteKey:'', validationServerId:'', validationDatasetPath:'', validationLaunching:false, validationStatus:{running:false,status:{}}, validationError:'', validationPollTimer:null, editVisible:false, editing:false, detailVisible:false, detailModel:null, colors:['#18a4c4','#8b5bd9','#ed8b2f','#35a86c','#ec5269','#527ce8'], open:{metrics:true,loss:true}, uploadForm:{name:'',framework:'PyTorch',score:'',file:null,metricsFile:null,metrics:''}, editForm:{id:'',name:'',framework:'PyTorch',score:'',trainingDate:'',trainingEpochs:'',metricsFile:null,metrics:''}, baseRankingColumns:[{key:'name',label:'模型',type:'model'},{key:'framework',label:'框架',type:'text'},{key:'precision',label:'精确率',type:'metric'},{key:'recall',label:'召回率',type:'metric'},{key:'map50',label:'mAP@50',type:'metric'},{key:'map5095',label:'mAP@50-95',type:'metric'}], trailingRankingColumns:[{key:'score',label:'得分',type:'text'},{key:'epochs',label:'轮数',type:'text'},{key:'date',label:'日期',type:'text'}], metricCharts:[{key:'precision',title:'精确率（Precision）'},{key:'recall',title:'召回率（Recall）'},{key:'map50',title:'mAP@50'},{key:'map5095',title:'mAP@50-95'}], lossCharts:[{key:'box_loss',title:'定位损失（box_loss）'},{key:'cls_loss',title:'分类损失（cls_loss）'},{key:'dfl_loss',title:'分布焦点损失（dfl_loss）'}] }),
   computed: {
     projectModels(){return this.project&&Array.isArray(this.project.models)?this.project.models:[]},
     filteredModels(){ return this.projectModels.filter(item=>item.name.toLowerCase().includes(this.keyword.toLowerCase())) },
@@ -147,7 +167,7 @@ export default {
     validationStatusLabel(){if(this.validationStatus.running)return'远程验证进行中';if(this.validationStatus.status.finished)return'远程验证已完成';if(this.validationStatus.interrupted)return'远程验证异常中断';return'远程验证尚未运行'}
   },
   watch:{keyword(){this.rankingPage=1},rankingTotalPages(value){if(this.rankingPage>value)this.rankingPage=value}},
-  mounted(){ this.load() },
+  mounted(){this.load()},
   beforeUnmount(){if(this.validationPollTimer)clearTimeout(this.validationPollTimer)},
   methods: {
     async load(){ const res=await getProject(this.$route.params.id); this.project=res.data.data; this.selected=this.project.models.map(item=>item.id) },
@@ -176,14 +196,17 @@ export default {
     chartLines(key){ return this.project.models.filter(item=>this.selected.includes(item.id) && item.metrics && item.metrics[key] && item.metrics[key].length).map(item=>({id:item.id,name:item.name,color:this.modelColor(item.id),values:item.metrics[key],epochs:item.metrics.epochs})) },
     toggleAll(){ const ids=this.filteredModels.map(item=>item.id); this.selected=this.allSelected?this.selected.filter(id=>!ids.includes(id)):[...new Set([...this.selected,...ids])] },
     pickModel(event){ this.uploadForm.file=event.target.files[0]; if(this.uploadForm.file && !this.uploadForm.name) this.uploadForm.name=this.uploadForm.file.name.replace(/\.[^.]+$/,'') },
-    openUploadDialog(){this.uploadVisible=true;if(this.uploadSource==='remote')this.loadRemoteModels()},
+    openUploadDialog(){Object.assign(this.uploadForm,{datasetVersion:this.uploadForm.datasetVersion||'',tags:this.uploadForm.tags||'',trainingConfig:this.uploadForm.trainingConfig||'{}',notes:this.uploadForm.notes||''});this.uploadVisible=true;if(this.uploadSource==='remote')this.loadRemoteModels()},
     changeUploadSource(source){if(source==='remote'&&!this.remoteServers.length)this.loadRemoteModels()},
     async loadRemoteModels(){this.remoteLoading=true;try{const res=await getRemoteModels(this.project.id);this.remoteServers=res.data.data.servers||[];this.remoteModels=res.data.data.models||[];if(!this.onlineRemoteServers.some(server=>server.id===this.validationServerId))this.validationServerId=(this.onlineRemoteServers[0]||{}).id||'';if(this.selectedRemoteModel&&this.selectedRemoteModel.sync_status==='synced')this.selectedRemoteKey='';if(this.validationServerId)this.pollClassMetricsStatus(false)}catch(error){this.validationError=error&&error.message?error.message:'远程模型列表加载失败'}finally{this.remoteLoading=false}},
     async startClassMetricsGeneration(){this.validationLaunching=true;this.validationError='';try{await generateRemoteClassMetrics(this.project.id,{server_id:this.validationServerId,dataset_path:this.validationDatasetPath});this.$message.success('逐类别验证已在远程后台启动');await this.pollClassMetricsStatus(true)}catch(error){this.validationError=error&&error.message?error.message:'逐类别验证启动失败'}finally{this.validationLaunching=false}},
     async pollClassMetricsStatus(schedule=true){if(!this.validationServerId)return;try{const res=await getRemoteClassMetricsStatus(this.project.id,this.validationServerId);this.validationStatus=res.data.data||{running:false,status:{}};const status=this.validationStatus.status||{};this.validationError=this.validationStatus.interrupted&&this.validationStatus.log_tail?this.validationStatus.log_tail.trim().split('\n').slice(-8).join('\n'):'';if(this.validationError&&schedule)this.$message.error('远程验证异常中断，请查看错误信息');if(schedule&&!this.validationStatus.running&&status.finished){await this.loadRemoteModels();this.$message.success('逐类别验证任务已完成，列表已刷新');return}}catch(error){if(this.validationPollTimer)clearTimeout(this.validationPollTimer);return}if(schedule&&this.validationStatus.running){if(this.validationPollTimer)clearTimeout(this.validationPollTimer);this.validationPollTimer=setTimeout(()=>this.pollClassMetricsStatus(true),5000)}},
     pickResultsCsv(event){ this.uploadForm.metricsFile=event.target.files[0] || null },
     loadMetricsFile(event){return this.mergeMetricsFiles(event,this.uploadForm)},
-    openEdit(model){this.editForm={id:model.id,name:model.name,framework:model.framework||'PyTorch',score:model.score||'',trainingDate:model.training_date||'',trainingEpochs:model.training_epochs||'',metricsFile:null,metrics:JSON.stringify(model.metrics||{},null,2)};this.editVisible=true},
+    modelDetail(model){return model&&model.metrics&&model.metrics.model_detail||{training_config:{},dataset_version:'',notes:'',tags:[],weight_hash:''}},
+    prettyConfig(model){return JSON.stringify(this.modelDetail(model).training_config||{},null,2)},
+    openDetail(model){this.detailModel=model;this.detailVisible=true},
+    openEdit(model){const detail=this.modelDetail(model);this.editForm={id:model.id,name:model.name,framework:model.framework||'PyTorch',score:model.score||'',trainingDate:model.training_date||'',trainingEpochs:model.training_epochs||'',metricsFile:null,metrics:JSON.stringify(model.metrics||{},null,2),datasetVersion:detail.dataset_version||'',tags:(detail.tags||[]).join(', '),trainingConfig:JSON.stringify(detail.training_config||{},null,2),notes:detail.notes||''};this.editVisible=true},
     pickEditResultsCsv(event){this.editForm.metricsFile=event.target.files[0]||null},
     loadEditMetricsFile(event){return this.mergeMetricsFiles(event,this.editForm)},
     readFileText(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsText(file)})},
@@ -191,18 +214,21 @@ export default {
       const files=Array.from(event.target.files||[]);if(!files.length)return
       try{const merged=target.metrics.trim()?JSON.parse(target.metrics):{};for(const file of files){const value=JSON.parse(await this.readFileText(file));if(!value||Array.isArray(value)||typeof value!=='object')throw new Error(`${file.name} 顶层必须是 JSON 对象`);Object.assign(merged,value)}target.metrics=JSON.stringify(merged,null,2);this.$message.success(`已合并 ${files.length} 个指标 JSON 文件`)}catch(error){this.$message.error(`JSON 合并失败：${error.message}`)}finally{event.target.value=''}
     },
+    async loadTrainingConfigFile(event,target){const file=event.target.files[0];if(!file)return;try{const text=await this.readFileText(file);const value=/\.ya?ml$/i.test(file.name)?YAML.parse(text):JSON.parse(text);if(!value||Array.isArray(value)||typeof value!=='object')throw new Error('配置顶层必须是对象');target.trainingConfig=JSON.stringify(value,null,2);this.$message.success('训练配置已读取')}catch(error){this.$message.error(`训练配置读取失败：${error.message}`)}finally{event.target.value=''}},
     async saveEdit(){
       if(!this.editForm.name.trim())return this.$message.warning('请输入模型名称')
       let metrics={};try{metrics=JSON.parse(this.editForm.metrics||'{}')}catch(e){return this.$message.error('指标 JSON 格式不正确')}
-      const data=new FormData();data.append('name',this.editForm.name);data.append('framework',this.editForm.framework);data.append('score',this.editForm.score);data.append('training_date',this.editForm.trainingDate||'');data.append('training_epochs',this.editForm.trainingEpochs||'');data.append('metrics',JSON.stringify(metrics));if(this.editForm.metricsFile)data.append('metrics_file',this.editForm.metricsFile);this.editing=true
+      try{JSON.parse(this.editForm.trainingConfig||'{}')}catch(e){return this.$message.error('训练配置必须是有效的 JSON 对象')}
+      const data=new FormData();data.append('name',this.editForm.name);data.append('framework',this.editForm.framework);data.append('score',this.editForm.score);data.append('training_date',this.editForm.trainingDate||'');data.append('training_epochs',this.editForm.trainingEpochs||'');data.append('metrics',JSON.stringify(metrics));data.append('dataset_version',this.editForm.datasetVersion||'');data.append('tags',this.editForm.tags||'');data.append('training_config',this.editForm.trainingConfig||'{}');data.append('notes',this.editForm.notes||'');if(this.editForm.metricsFile)data.append('metrics_file',this.editForm.metricsFile);this.editing=true
       try{const res=await updateModel(this.project.id,this.editForm.id,data);this.editVisible=false;await this.load();if(!this.hasCategoryMetrics(res.data.data.metrics))this.$message.warning('修改已保存，但指标 JSON 中未识别到小样本或类别级指标数据');else this.$message.success('模型修改成功')}finally{this.editing=false}
     },
     async upload(){
       if(this.uploadSource==='remote')return this.importRemote()
       if(!this.uploadForm.file)return this.$message.warning('请选择已训练好的模型文件')
       let metrics={}; if(this.uploadForm.metrics.trim()){try{metrics=JSON.parse(this.uploadForm.metrics)}catch(e){return this.$message.error('指标 JSON 格式不正确')}}
-      const data=new FormData(); data.append('model',this.uploadForm.file); data.append('name',this.uploadForm.name); data.append('framework',this.uploadForm.framework); data.append('score',this.uploadForm.score); data.append('metrics',JSON.stringify(metrics)); if(this.uploadForm.metricsFile)data.append('metrics_file',this.uploadForm.metricsFile); this.uploading=true
-      try{const res=await addModel(this.project.id,data); this.uploadVisible=false; this.uploadForm={name:'',framework:'PyTorch',score:'',file:null,metricsFile:null,metrics:''}; await this.load(); if(!this.hasCategoryMetrics(res.data.data.metrics))this.$message.warning('模型已保存，但指标 JSON 中未识别到小样本或类别级指标数据'); else this.$message.success('模型和训练指标已保存')}finally{this.uploading=false}
+      try{JSON.parse(this.uploadForm.trainingConfig||'{}')}catch(e){return this.$message.error('训练配置必须是有效的 JSON 对象')}
+      const data=new FormData(); data.append('model',this.uploadForm.file); data.append('name',this.uploadForm.name); data.append('framework',this.uploadForm.framework); data.append('score',this.uploadForm.score); data.append('metrics',JSON.stringify(metrics));data.append('dataset_version',this.uploadForm.datasetVersion||'');data.append('tags',this.uploadForm.tags||'');data.append('training_config',this.uploadForm.trainingConfig||'{}');data.append('notes',this.uploadForm.notes||''); if(this.uploadForm.metricsFile)data.append('metrics_file',this.uploadForm.metricsFile); this.uploading=true
+      try{const res=await addModel(this.project.id,data); this.uploadVisible=false; this.uploadForm={name:'',framework:'PyTorch',score:'',file:null,metricsFile:null,metrics:'',datasetVersion:'',tags:'',trainingConfig:'{}',notes:''}; await this.load(); if(!this.hasCategoryMetrics(res.data.data.metrics))this.$message.warning('模型已保存，但指标 JSON 中未识别到小样本或类别级指标数据'); else this.$message.success('模型和训练指标已保存')}finally{this.uploading=false}
     },
     async importRemote(){const model=this.selectedRemoteModel;if(!model)return this.$message.warning('请选择远程模型');this.uploading=true;try{await importRemoteModel(this.project.id,{server_id:model.server_id,remote_path:model.remote_path,name:model.name,framework:'PyTorch'});this.uploadVisible=false;this.selectedRemoteKey='';await this.load();this.$message.success(model.has_results?'模型和 results.csv 已同步':'模型已同步，但远程目录没有 results.csv')}finally{this.uploading=false}},
     async remove(model){ try{await this.$confirm(`确认删除模型“${model.name}”吗？`,'删除模型',{type:'warning'}); await removeModel(this.project.id,model.id); await this.load()}catch(e){/* 用户取消 */} },
@@ -249,4 +275,5 @@ export default {
   }
   .charts-panel .compare-tip span{max-width:100%}
 }
+.model-detail-card header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.model-detail-card h2,.model-detail-card header p{margin:0}.model-detail-card header p{margin-top:6px;color:#8591a2}.detail-tags{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}.detail-tags span{padding:5px 9px;border-radius:14px;color:#347ecc;background:#edf6ff;font-size:11px}.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:20px 0}.detail-grid>div{padding:14px;border-radius:9px;background:#f6f8fb}.detail-grid small,.detail-grid strong{display:block}.detail-grid small{margin-bottom:6px;color:#8b96a6;font-size:10px}.detail-grid .hash{grid-column:1/-1}.detail-grid .hash strong{overflow:hidden;font:11px Consolas,monospace;text-overflow:ellipsis}.model-detail-card section{margin-top:17px}.model-detail-card section h3{font-size:13px}.model-detail-card section pre,.model-detail-card section>p{padding:13px;border-radius:8px;background:#f5f7fa;color:#526075;font:12px/1.65 Consolas,monospace;white-space:pre-wrap}.detail-button{font-size:14px!important}.detail-button:hover{color:#6c56d9!important}
 </style>

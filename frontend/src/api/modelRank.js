@@ -25,3 +25,15 @@ export const updateModel = (projectId, modelId, data) => request({
 export const removeModel = (projectId, modelId) => request({
   url: `/api/model-rank/projects/${projectId}/models/${modelId}`, method: 'delete'
 })
+export const uploadModelDiagnostics = (projectId, modelId, data, onUploadProgress) => request({
+  url: `/api/model-rank/projects/${projectId}/models/${modelId}/diagnostics`, method: 'post', data, onUploadProgress
+})
+export const generateModelDiagnostics = (projectId, modelId, datasetId, sampleLimit = 50) => request({
+  url: `/api/model-rank/projects/${projectId}/models/${modelId}/diagnostics/generate`, method: 'post', data: { dataset_id: datasetId, sample_limit: sampleLimit }
+})
+export const getModelDiagnosticsStatus = (projectId, modelId, datasetId) => request({
+  url: `/api/model-rank/projects/${projectId}/models/${modelId}/diagnostics/status`, method: 'get', params: { dataset_id: datasetId }
+})
+export const getModelDiagnostics = (projectId, modelId, params = {}) => request({
+  url: `/api/model-rank/projects/${projectId}/models/${modelId}/diagnostics`, method: 'get', params
+})
