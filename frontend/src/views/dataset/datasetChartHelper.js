@@ -138,46 +138,52 @@ export function getTopClassPieOption(topClassList = []) {
  * 4. Charts页面：单张图片标注数量分布柱状图 Objects per Image
  * @param {Array} countList [1,2,2,3...]
  */
-export function getObjPerImageBarOption(countList = []) {
-    // 统计频次
-    const map = {}
-    countList.forEach(num => {
-        map[num] = (map[num] || 0) + 1
-    })
-    const xData = Object.keys(map).sort((a, b) => Number(a) - Number(b))
-    const yData = xData.map(k => map[k])
+// 单图标注数量分布柱状图
+export function getObjPerImageBarOption(objectCountList) {
+    // 1. 按标注数量从小到大排序
+    const sorted = [...objectCountList].sort((a, b) => a.box - b.box)
+
+    // 2. 提取X轴数据（标注数量）和Y轴数据（图片数量）
+    const xData = sorted.map(item => String(item.box))
+    const yData = sorted.map(item => item.count)
 
     return {
         tooltip: {
             trigger: 'axis',
-            backgroundColor: '#ffffff',
-            textStyle: {color: '#333'},
-            borderColor: '#e5e7eb',
-            borderRadius: 8
+            formatter: '{b} 个标注<br/>图片数量：{c}'
         },
-        grid: {left: 50, right: 20, top: 30, bottom: 50},
+        grid: {
+            left: '5%',
+            right: '5%',
+            bottom: '10%',
+            top: '10%',
+            containLabel: true
+        },
         xAxis: {
             type: 'category',
             name: '标注数量',
-            axisLine: {lineStyle: {color: '#e5e7eb'}},
-            axisTick: {show: false}
+            nameTextStyle: {color: '#999', fontSize: 12},
+            data: xData,
+            axisLabel: {color: '#666'},
+            axisLine: {lineStyle: {color: '#ddd'}}
         },
         yAxis: {
             type: 'value',
             name: '图片数量',
-            splitLine: {lineStyle: {color: '#f0f2f5'}},
-            axisLine: {show: false},
-            axisTick: {show: false}
+            nameTextStyle: {color: '#999', fontSize: 12},
+            axisLabel: {color: '#666'},
+            axisLine: {lineStyle: {color: '#ddd'}},
+            splitLine: {lineStyle: {color: '#f0f0f0'}}
         },
-        series: [
-            {
-                type: 'bar',
-                data: yData,
-                barWidth: '55%',
-                barRadius: [6, 6, 0, 0],
-                itemStyle: {color: '#26c2b0'}
+        series: [{
+            type: 'bar',
+            data: yData,
+            barWidth: '60%',
+            itemStyle: {
+                color: '#36cbcb',
+                borderRadius: [4, 4, 0, 0]
             }
-        ]
+        }]
     }
 }
 

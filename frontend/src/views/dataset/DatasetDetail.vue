@@ -664,7 +664,7 @@ export default {
     },
     async activeTab(newTab) {
       this.selectedImage = null
-      // 切换离开charts页面，立刻销毁所有图表实例
+      // 离开charts标签，销毁实例
       if (this.activeTab === 'charts' && newTab !== 'charts') {
         this.destroyAllCharts()
       }
@@ -679,20 +679,18 @@ export default {
         })
       }
       if (newTab === 'charts') {
-        // 先等待DOM渲染完成（v-if重建容器）
         await this.$nextTick()
-        // 请求统计接口
         await this.loadChartStatistics()
-        // 销毁残留实例
         this.destroyAllCharts()
-        // 渲染图表
-        this.renderAllCharts()
-        // 延时resize，确保容器完全渲染完成
-        setTimeout(() => {
-          Object.values(this.charts).forEach(ins => {
-            if (ins) ins.resize()
-          })
-        }, 120)
+        this.$nextTick(async () => {
+          this.renderAllCharts()
+          // 加长延时，双层延时保证DOM布局稳定
+          setTimeout(() => {
+            Object.values(this.charts).forEach(ins => {
+              if (ins) ins.resize()
+            })
+          }, 60)
+        })
       }
     },
     // 下方所有watch保留不动
@@ -1272,7 +1270,21 @@ export default {
         const url = `${global.BASEURL}/api/dataset/${this.dataset.id}/chart-stat`
         const res = await axios.get(url)
         console.log("【图表原始数据】", res.data.data)
-        this.datasetStats = res.data.data || {}
+        const raw = res.data.data || {}
+
+        // ✅ 字段映射：统一后端返回字段名为前端使用的字段名
+        this.datasetStats = {
+          ...raw,
+          // 单图标注数量分布：box_distribution → object_count_list
+          object_count_list: raw.box_distribution || [],
+          // 图片尺寸分布：width_data/height_data → width_list/height_list
+          width_list: raw.width_data || [],
+          height_list: raw.height_data || [],
+          // Top Classes 数据备份
+          top_classes: raw.top_classes || []
+        }
+
+        console.log("【映射后数据】", this.datasetStats)
       } catch (err) {
         console.error("加载图表统计失败", err)
         this.datasetStats = {}
@@ -1814,9 +1826,9 @@ export default {
 .chart-box {
   width: 100%;
   height: 320px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  //display: flex;
+  //align-items: center;
+  //justify-content: center;
   color: #999;
 }
 
