@@ -2,7 +2,6 @@
   <main v-if="dataset" class="detail-page">
     <header class="page-header">
       <div>
-        <div class="back" @click="$router.push('/dataset-management')">← 返回数据集列表</div>
         <div class="title-row">
           <h1 v-if="!editName">{{ dataset.name }}</h1>
           <el-input
@@ -467,7 +466,13 @@
         </div>
       </div>
     </div>
+    <!-- ========== 新增页脚 ========== -->
+    <footer class="page-footer">
+      <div class="back" @click="$router.push('/dataset-management')">← 返回数据集列表</div>
+      <span class="footer-tip">GeoView · 遥感数据集管理</span>
+    </footer>
   </main>
+
 </template>
 
 <script>
@@ -1329,12 +1334,13 @@ export default {
   margin: 0 auto 22px;
 }
 
+/*
 .back {
   color: #498ee6;
   font-size: 12px;
   cursor: pointer;
-  margin-bottom: 6px;
 }
+*/
 
 .title-row {
   display: flex;
@@ -2181,5 +2187,32 @@ export default {
   font-size: 16px;
   color: #777;
   margin: 0;
+}
+
+/* 页脚 */
+.page-footer {
+  margin-top: 48px;
+  padding: 24px 8px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.back {
+  color: #2b77e5;
+  cursor: pointer;
+  font-size: 14px;
+  transition: 0.2s;
+}
+
+.back:hover {
+  color: #1d5bbd;
+  text-decoration: underline;
+}
+
+.footer-tip {
+  font-size: 14px;
+  color: #64748b;
 }
 </style>
