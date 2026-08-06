@@ -696,11 +696,14 @@ export default {
       }
       if (newTab === 'charts') {
         await this.$nextTick()
+        // 新增：没有类别数据就加载
+        if (!this.classList.length) {
+          await this.loadClassData()
+        }
         await this.loadChartStatistics()
         this.destroyAllCharts()
         this.$nextTick(async () => {
           this.renderAllCharts()
-          // 加长延时，双层延时保证DOM布局稳定
           setTimeout(() => {
             Object.values(this.charts).forEach(ins => {
               if (ins) ins.resize()
@@ -1105,18 +1108,36 @@ export default {
       this.charts.splitPie = chartIns
     },
 
+    // 新增
+    processTopClassData(classList, topN = 10) {
+      // 按标注数量降序
+      const sorted = [...classList].sort((a, b) => b.annotation_count - a.annotation_count)
+      const topList = sorted.slice(0, topN)
+      const restList = sorted.slice(topN)
+      const otherCount = restList.reduce((sum, item) => sum + item.annotation_count, 0)
+
+      const chartData = [...topList]
+      if (otherCount > 0) {
+        chartData.push({
+          name: "Other",
+          annotation_count: otherCount,
+          class_id: -1 // 标记Other
+        })
+      }
+      return chartData
+    },
+
+    // 替换后
     renderTopClassPieChart() {
       const dom = this.$refs.topClassChartWrap
       if (!dom) return
       disposeChart(this.charts.topClassPie)
       const chartIns = echarts.init(dom)
-      const topList = this.classList.slice(0, 8)
-      const formatData = topList.map(item => ({
-        name: item.name,
-        value: item.annotation_count,
-        class_id: item.class_id
-      }))
-      const option = getTopClassPieOption(formatData)
+
+      // 使用预处理函数，取Top10，自动合并剩余为Other
+      const pieData = this.processTopClassData(this.classList, 10)
+
+      const option = getTopClassPieOption(pieData, this.classNameCnMap)
       chartIns.setOption(option)
       this.charts.topClassPie = chartIns
     },
