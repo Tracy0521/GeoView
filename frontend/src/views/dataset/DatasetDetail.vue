@@ -2,7 +2,6 @@
   <main v-if="dataset" class="detail-page">
     <header class="page-header">
       <div>
-        <div class="back" @click="$router.push('/dataset-management')">← 返回数据集列表</div>
         <div class="title-row">
           <h1 v-if="!editName">{{ dataset.name }}</h1>
           <el-input
@@ -182,84 +181,88 @@
 
         <!-- Table 表格视图 -->
         <div v-if="viewMode === 'table'" class="table-view">
-          <table>
-            <thead>
-            <tr>
-              <th style="width:80px">Preview</th>
-              <th>
-                <button class="table-sort-btn" @click="sortTable('filename')">
-                  Name
-                  <span>{{ getSortArrow('filename') }}</span>
-                </button>
-              </th>
-              <th>
-                <button class="table-sort-btn" @click="sortTable('height')">
-                  Height
-                  <span>{{ getSortArrow('height') }}</span>
-                </button>
-              </th>
-              <th>
-                <button class="table-sort-btn" @click="sortTable('width')">
-                  Width
-                  <span>{{ getSortArrow('width') }}</span>
-                </button>
-              </th>
-              <th>
-                <button class="table-sort-btn" @click="sortTable('size')">
-                  Size
-                  <span>{{ getSortArrow('size') }}</span>
-                </button>
-              </th>
-              <th>Split</th>
-              <th>
-                <button class="table-sort-btn" @click="sortTable('box_count')">
-                  Annotations
-                  <span>{{ getSortArrow('box_count') }}</span>
-                </button>
-              </th>
-              <th style="min-width: 240px;">Classes</th>
-            </tr>
-            </thead>
-            <tbody>
-            <tr
-                v-for="img in sortedTableImages"
-                :key="img.id"
-                :class="{ active: selectedImage?.id === img.id }"
-                @click="openImageViewer(img)"
-            >
-              <td>
-                <div class="table-thumb">
-                  <canvas class="table-canvas" :data-img-id="img.id"></canvas>
-                </div>
-              </td>
-              <td>{{ img.filename }}</td>
-              <td>{{ img.height != null ? img.height : '-' }}</td>
-              <td>{{ img.width != null ? img.width : '-' }}</td>
-              <td>{{ img.size != null ? formatFileSize(img.size) : '-' }}</td>
-              <td>
-                <!-- 【修复】class绑定在外层split-row -->
-                <span class="split-row" :class="splitClass(img.split)">
-      <span class="split-dot"></span>
-      <span class="split-text">{{ getSplitName(img.split) }}</span>
-    </span>
-              </td>
-              <td>{{ img.box_count }}</td>
-              <td>
-    <span class="classes-cell">
-      <span
-          v-for="cls in img.class_list"
-          :key="cls.class_id"
-          class="class-tag"
-      >
-      <span class="color-dot-small" :style="{background:getClassColor(cls.class_id)}"></span>
-      {{ classNameCnMap[cls.class_id] || cls.name }}<sup>{{ cls.count }}</sup>
+          <!-- 新增横向滚动容器 -->
+          <div class="table-scroll-wrap">
+            <table>
+              <thead>
+              <tr>
+                <!--              <th style="width:80px">Preview</th>-->
+                <th style="width:80px">预览</th>
+                <th>
+                  <button class="table-sort-btn" @click="sortTable('filename')">
+                    名称
+                    <span>{{ getSortArrow('filename') }}</span>
+                  </button>
+                </th>
+                <th>
+                  <button class="table-sort-btn" @click="sortTable('height')">
+                    高
+                    <span>{{ getSortArrow('height') }}</span>
+                  </button>
+                </th>
+                <th>
+                  <button class="table-sort-btn" @click="sortTable('width')">
+                    宽
+                    <span>{{ getSortArrow('width') }}</span>
+                  </button>
+                </th>
+                <th>
+                  <button class="table-sort-btn" @click="sortTable('size')">
+                    大小
+                    <span>{{ getSortArrow('size') }}</span>
+                  </button>
+                </th>
+                <th>划分</th>
+                <th>
+                  <button class="table-sort-btn" @click="sortTable('box_count')">
+                    标注数
+                    <span>{{ getSortArrow('box_count') }}</span>
+                  </button>
+                </th>
+                <th style="min-width: 240px;">类别</th>
+              </tr>
+              </thead>
+              <tbody>
+              <tr
+                  v-for="img in sortedTableImages"
+                  :key="img.id"
+                  :class="{ active: selectedImage?.id === img.id }"
+                  @click="openImageViewer(img)"
+              >
+                <td>
+                  <div class="table-thumb">
+                    <canvas class="table-canvas" :data-img-id="img.id"></canvas>
+                  </div>
+                </td>
+                <td>{{ img.filename }}</td>
+                <td>{{ img.height != null ? img.height : '-' }}</td>
+                <td>{{ img.width != null ? img.width : '-' }}</td>
+                <td>{{ img.size != null ? formatFileSize(img.size) : '-' }}</td>
+                <td>
+                  <!-- 【修复】class绑定在外层split-row -->
+                  <span class="split-row" :class="splitClass(img.split)">
+        <span class="split-dot"></span>
+        <span class="split-text">{{ getSplitName(img.split) }}</span>
       </span>
-    </span>
-                <span v-if="!img.class_list || img.class_list.length === 0">-</span>
-              </td>
-            </tr>
-            </tbody>
-          </table>
+                </td>
+                <td>{{ img.box_count }}</td>
+                <td>
+      <span class="classes-cell">
+        <span
+            v-for="cls in img.class_list"
+            :key="cls.class_id"
+            class="class-tag"
+        >
+        <span class="color-dot-small" :style="{background:getClassColor(cls.class_id)}"></span>
+        {{ classNameCnMap[cls.class_id] || cls.name }}<sup>{{ cls.count }}</sup>
+        </span>
+      </span>
+                  <span v-if="!img.class_list || img.class_list.length === 0">-</span>
+                </td>
+              </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div v-if="loading" class="load-tip">加载中……</div>
@@ -314,11 +317,13 @@
       </div>
     </div>
 
+
     <!-- ========== Classes 标签页【改造完成】 ========== -->
     <div v-if="activeTab === 'classes'" class="tab-content">
       <div class="chart-card">
         <div class="chart-header-row">
-          <h3>Class Distribution</h3>
+          <!--          <h3>Class Distribution</h3>-->
+          <h3>类别分布</h3>
           <span class="chart-subtitle">{{ classList.length }} classes · {{
               totalAnnotationCount
             }} total annotations</span>
@@ -328,30 +333,35 @@
 
       <div class="class-table-wrap">
         <div class="table-head-row">
-          <h3>Classes</h3>
+          <!--          <h3>Classes</h3>-->
+          <h3>类别</h3>
         </div>
         <table class="class-table">
           <thead>
           <tr>
             <th style="width:110px">
-              <span>Index</span>
+              <!--              <span>Index</span>-->
+              <span>索引</span>
               <button class="sort-btn" @click="sortByField('class_id')">
                 {{ sortField === 'class_id' ? (sortAsc ? '↑' : '↓') : '⇅' }}
               </button>
             </th>
             <th>
-              <span>Name</span>
+              <!--              <span>Name</span>-->
+              <span>名称</span>
               <button class="sort-btn" @click="sortByField('name')">
                 {{ sortField === 'name' ? (sortAsc ? '↑' : '↓') : '⇅' }}
               </button>
             </th>
             <th style="width:160px">
-              <span>Annotations</span>
+              <!--              <span>Annotations</span>-->
+              <span>标注数量</span>
               <button class="sort-btn" @click="sortByField('annotation_count')">
                 {{ sortField === 'annotation_count' ? (sortAsc ? '↑' : '↓') : '⇅' }}
               </button>
             </th>
-            <th style="width:140px">Images</th>
+            <!--            <th style="width:140px">Images</th>-->
+            <th style="width:140px">影像数</th>
           </tr>
           </thead>
           <tbody>
@@ -397,7 +407,7 @@
           <div class="chart-box" ref="splitChartWrap">划分饼图</div>
         </div>
         <div class="chart-card">
-          <h3>Top Classes</h3>
+          <h3>高频类别</h3>
           <div class="chart-box" ref="topClassChartWrap">Top类别饼图</div>
         </div>
         <div class="chart-card">
@@ -456,7 +466,13 @@
         </div>
       </div>
     </div>
+    <!-- ========== 新增页脚 ========== -->
+    <footer class="page-footer">
+      <div class="back" @click="$router.push('/dataset-management')">← 返回数据集列表</div>
+      <span class="footer-tip">GeoView · 遥感数据集管理</span>
+    </footer>
   </main>
+
 </template>
 
 <script>
@@ -680,11 +696,14 @@ export default {
       }
       if (newTab === 'charts') {
         await this.$nextTick()
+        // 新增：没有类别数据就加载
+        if (!this.classList.length) {
+          await this.loadClassData()
+        }
         await this.loadChartStatistics()
         this.destroyAllCharts()
         this.$nextTick(async () => {
           this.renderAllCharts()
-          // 加长延时，双层延时保证DOM布局稳定
           setTimeout(() => {
             Object.values(this.charts).forEach(ins => {
               if (ins) ins.resize()
@@ -1089,18 +1108,36 @@ export default {
       this.charts.splitPie = chartIns
     },
 
+    // 新增
+    processTopClassData(classList, topN = 10) {
+      // 按标注数量降序
+      const sorted = [...classList].sort((a, b) => b.annotation_count - a.annotation_count)
+      const topList = sorted.slice(0, topN)
+      const restList = sorted.slice(topN)
+      const otherCount = restList.reduce((sum, item) => sum + item.annotation_count, 0)
+
+      const chartData = [...topList]
+      if (otherCount > 0) {
+        chartData.push({
+          name: "Other",
+          annotation_count: otherCount,
+          class_id: -1 // 标记Other
+        })
+      }
+      return chartData
+    },
+
+    // 替换后
     renderTopClassPieChart() {
       const dom = this.$refs.topClassChartWrap
       if (!dom) return
       disposeChart(this.charts.topClassPie)
       const chartIns = echarts.init(dom)
-      const topList = this.classList.slice(0, 8)
-      const formatData = topList.map(item => ({
-        name: item.name,
-        value: item.annotation_count,
-        class_id: item.class_id
-      }))
-      const option = getTopClassPieOption(formatData)
+
+      // 使用预处理函数，取Top10，自动合并剩余为Other
+      const pieData = this.processTopClassData(this.classList, 10)
+
+      const option = getTopClassPieOption(pieData, this.classNameCnMap)
       chartIns.setOption(option)
       this.charts.topClassPie = chartIns
     },
@@ -1318,12 +1355,13 @@ export default {
   margin: 0 auto 22px;
 }
 
+/*
 .back {
   color: #498ee6;
   font-size: 12px;
   cursor: pointer;
-  margin-bottom: 6px;
 }
+*/
 
 .title-row {
   display: flex;
@@ -1641,7 +1679,19 @@ export default {
   background: #fff;
   border-radius: 12px;
   border: 1px solid #e3e8ef;
-  overflow: hidden;
+  //overflow: hidden;
+}
+
+/* 新增：横向滚动容器 */
+.table-scroll-wrap {
+  overflow-x: auto;
+}
+
+.table-scroll-wrap table {
+  /* 关键：设置表格最小总宽度，小于这个宽度就出现滚动条 */
+  min-width: 920px;
+  width: 100%;
+  border-collapse: collapse;
 }
 
 .table-view table {
@@ -2158,5 +2208,32 @@ export default {
   font-size: 16px;
   color: #777;
   margin: 0;
+}
+
+/* 页脚 */
+.page-footer {
+  margin-top: 48px;
+  padding: 24px 8px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.back {
+  color: #2b77e5;
+  cursor: pointer;
+  font-size: 14px;
+  transition: 0.2s;
+}
+
+.back:hover {
+  color: #1d5bbd;
+  text-decoration: underline;
+}
+
+.footer-tip {
+  font-size: 14px;
+  color: #64748b;
 }
 </style>

@@ -98,14 +98,39 @@ export function getSplitPieOption(trainCount = 0, valCount = 0) {
 }
 
 /**
- * 3. Charts页面：Top N类别环形饼图 Top Classes
- * @param {Array} topClassList [{name, annotation_count, class_id}]
+ * 3. Charts页面：Top N类别环形饼图 Top Classes（支持Other合并+右侧滚动图例）
+ * @param {Array} topClassList [{name, annotation_count, class_id}] 经过processTopClassData处理，包含Other
+ * @param {Object} classNameCnMap 类别ID到中文名称映射 {0:"航母",3:"民船",24:"发射车"}
  */
-export function getTopClassPieOption(topClassList = []) {
+export function getTopClassPieOption(topClassList = [], classNameCnMap = {}) {
+    const totalAll = topClassList.reduce((sum, item) => sum + item.annotation_count, 0)
+
+    // class_id=-1代表Other，固定灰色；其余沿用hsl配色
     const colorList = topClassList.map(item => {
+        if (item.class_id === -1) {
+            return '#9ca3af'
+        }
         const hue = (item.class_id * 47) % 360
         return `hsl(${hue}, 70%, 55%)`
     })
+
+    // 构造饼图数据，图例显示：中文名称 · 数量 · 百分比
+    const pieData = topClassList.map(item => {
+        const pct = totalAll === 0 ? 0 : ((item.annotation_count / totalAll) * 100).toFixed(1)
+        // class_id=-1是Other，直接保留原名；其他id读取中文映射，兜底用原始name
+        let displayName
+        if (item.class_id === -1) {
+            displayName = item.name
+        } else {
+            displayName = classNameCnMap[item.class_id] ?? item.name
+        }
+        return {
+            name: `${displayName} · ${item.annotation_count} · ${pct}%`,
+            value: item.annotation_count,
+            rawName: displayName // tooltip也使用中文
+        }
+    })
+
     return {
         tooltip: {
             trigger: 'item',
@@ -113,12 +138,26 @@ export function getTopClassPieOption(topClassList = []) {
             textStyle: {color: '#333'},
             borderColor: '#e5e7eb',
             borderRadius: 8,
-            formatter: '{b}<br/>{c} 框 ({d}%)'
+            formatter: function (params) {
+                return `${params.data.rawName}<br/>标注框: ${params.value} (${params.percent}%)`
+            }
+        },
+        // 右侧垂直滚动图例
+        legend: {
+            orient: 'vertical',
+            right: 4,
+            top: 'center',
+            height: '80%',
+            type: 'scroll',
+            textStyle: {
+                fontSize: 12
+            }
         },
         series: [
             {
                 type: 'pie',
                 radius: ['42%', '72%'],
+                center: ['40%', '50%'], // 饼图向左偏移，腾出右侧空间给图例
                 itemStyle: {
                     borderRadius: 6,
                     borderColor: '#fff',
@@ -127,8 +166,11 @@ export function getTopClassPieOption(topClassList = []) {
                         return colorList[params.dataIndex]
                     }
                 },
-                data: topClassList,
-                label: {show: false}
+                data: pieData,
+                label: {show: false},
+                emphasis: {
+                    label: {show: true, fontSize: 14}
+                }
             }
         ]
     }
