@@ -39,6 +39,7 @@
           <div v-show="open.metrics" class="chart-grid two">
             <MetricChart v-for="metric in metricCharts" :key="metric.key" :title="metric.title" :lines="chartLines(metric.key)" />
             <SmallSampleChart :datasets="smallSampleDatasets" />
+            <OperationalRiskCharts :models="projectModels" :selected="selected" :colors="colors" />
           </div>
         </div>
         <div class="section-card">
@@ -136,12 +137,13 @@
 <script>
 import MetricChart from '@/components/MetricChart.vue'
 import SmallSampleChart from '@/components/SmallSampleChart.vue'
+import OperationalRiskCharts from '@/components/OperationalRiskCharts.vue'
 import ClassMetricAnalysis from '@/components/ClassMetricAnalysis.vue'
 import ErrorDiagnosisCenter from '@/components/ErrorDiagnosisCenter.vue'
 import YAML from 'yaml'
 import { addModel, generateRemoteClassMetrics, getProject, getRemoteClassMetricsStatus, getRemoteModels, importRemoteModel, removeModel, updateModel } from '@/api/modelRank'
 export default {
-  name: 'ModelProjectDetail', components: { MetricChart, SmallSampleChart, ClassMetricAnalysis, ErrorDiagnosisCenter },
+  name: 'ModelProjectDetail', components: { MetricChart, SmallSampleChart, OperationalRiskCharts, ClassMetricAnalysis, ErrorDiagnosisCenter },
   data: () => ({ project:null, activeView:'charts', keyword:'', selected:[], rankingSortKey:'map5095', rankingSortDirection:'desc', rankingPage:1, rankingPageSize:10, uploadVisible:false, uploading:false, uploadSource:'local', remoteLoading:false, remoteServers:[], remoteModels:[], selectedRemoteKey:'', validationServerId:'', validationDatasetPath:'', validationLaunching:false, validationStatus:{running:false,status:{}}, validationError:'', validationPollTimer:null, editVisible:false, editing:false, detailVisible:false, detailModel:null, colors:['#18a4c4','#8b5bd9','#ed8b2f','#35a86c','#ec5269','#527ce8'], open:{metrics:true,loss:true}, uploadForm:{name:'',framework:'PyTorch',score:'',file:null,metricsFile:null,metrics:''}, editForm:{id:'',name:'',framework:'PyTorch',score:'',trainingDate:'',trainingEpochs:'',metricsFile:null,metrics:''}, baseRankingColumns:[{key:'name',label:'模型',type:'model'},{key:'framework',label:'框架',type:'text'},{key:'precision',label:'精确率',type:'metric'},{key:'recall',label:'召回率',type:'metric'},{key:'map50',label:'mAP@50',type:'metric'},{key:'map5095',label:'mAP@50-95',type:'metric'}], trailingRankingColumns:[{key:'score',label:'得分',type:'text'},{key:'epochs',label:'轮数',type:'text'},{key:'date',label:'日期',type:'text'}], metricCharts:[{key:'precision',title:'精确率（Precision）'},{key:'recall',title:'召回率（Recall）'},{key:'map50',title:'mAP@50'},{key:'map5095',title:'mAP@50-95'}], lossCharts:[{key:'box_loss',title:'定位损失（box_loss）'},{key:'cls_loss',title:'分类损失（cls_loss）'},{key:'dfl_loss',title:'分布焦点损失（dfl_loss）'}] }),
   computed: {
     projectModels(){return this.project&&Array.isArray(this.project.models)?this.project.models:[]},
